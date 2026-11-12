@@ -238,8 +238,9 @@ enum RedditAccount {
     static func syncCommunities() async {
         guard !synced else { return }
         synced = true
-        if let names = try? await Reddit.mySubscriptions(), !names.isEmpty {
-            Library.shared.subs = names
+        if let subs = try? await Reddit.mySubscriptions(), !subs.isEmpty {
+            Library.shared.subs = subs.map(\.name)
+            for s in subs { Library.shared.learnIcon(s.name, s.icon) }
         } else {
             synced = false
         }

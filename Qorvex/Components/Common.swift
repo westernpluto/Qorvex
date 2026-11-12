@@ -195,39 +195,45 @@ struct UserRow: View {
 /// Header with banner, icon, stats and join button.
 struct SubredditHeader: View {
     let name: String
-    @State private var info: Subreddit?
+    /// Community details that arrived with the feed itself (no extra request).
+    var detail: Subreddit? = nil
+    @State private var fetched: Subreddit?
     @State private var showAbout = false
+
+    private var info: Subreddit? { detail ?? fetched }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ZStack {
-                LinearGradient(colors: [Avatar.color(name), Avatar.color(name + "x").opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                if let b = info?.bannerURL { RemoteImage(url: b) }
-            }
-            .frame(height: 110)
-            .clipped()
-            .overlay(LinearGradient(colors: [.clear, .black.opacity(0.25)], startPoint: .top, endPoint: .bottom))
+            // The banner fills a fixed frame; it must never decide the layout's width.
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: 104)
+                .background(LinearGradient(colors: [Avatar.color(name), Avatar.color(name + "x").opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay { if let b = info?.bannerURL { RemoteImage(url: b) } }
+                .clipped()
 
             HStack(alignment: .bottom, spacing: 12) {
-                Avatar(name: name, url: info?.iconURL, size: 68)
+                Avatar(name: name, url: info?.iconURL ?? Library.shared.icon(for: name), size: 64)
                     .overlay(Circle().stroke(Color.appBackground, lineWidth: 4))
-                    .offset(y: -22)
-                    .padding(.bottom, -22)
+                    .offset(y: -20)
+                    .padding(.bottom, -20)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(info?.title?.isEmpty == false ? info!.title! : "r/\(name)")
-                        .font(.title3.weight(.bold)).lineLimit(2)
+                    Text("r/\(info?.display_name ?? name)")
+                        .font(.title3.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     HStack(spacing: 4) {
-                        Text("r/\(info?.display_name ?? name)")
-                        if let s = info?.subscribers { Text("· \(s.compact) members") }
+                        if let s = info?.subscribers { Text("\(s.compact) members") }
                         if let o = info?.online, o > 0 {
                             Text("·")
                             Circle().fill(.green).frame(width: 6, height: 6)
-                            Text("\(o.compact)")
+                            Text("\(o.compact) online")
                         }
                     }
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Spacer(minLength: 0)
+                .layoutPriority(1)
+                Spacer(minLength: 8)
                 JoinButton(name: name)
             }
             .padding(.horizontal, 16)
@@ -238,7 +244,9 @@ struct SubredditHeader: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16).padding(.top, 10)
+                    .contentShape(Rectangle())
                     .onTapGesture { showAbout = true }
             }
             Button {
@@ -252,7 +260,14 @@ struct SubredditHeader: View {
             .foregroundStyle(Color.accentColor)
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
-        .task { if info == nil && Reddit.apiActive { info = try? await Reddit.about(name) } }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: detail?.display_name) {
+            // Only ask Reddit when the feed didn't already include the community's details.
+            guard detail == nil, fetched == nil, Reddit.apiActive else { return }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard detail == nil else { return }
+            fetched = try? await Reddit.about(name)
+        }
         .sheet(isPresented: $showAbout) {
             NavigationStack {
                 ScrollView {

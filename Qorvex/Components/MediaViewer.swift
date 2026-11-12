@@ -44,49 +44,48 @@ struct MediaViewer: View {
             .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { chrome.toggle() } }
 
             if chrome {
-                VStack {
-                    HStack(spacing: 12) {
+                VStack(spacing: 0) {
+                    if item.entries.count > 1 {
+                        Text("\(index + 1) of \(item.entries.count)")
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.top, 8)
+                    }
+                    Spacer()
+                    if let cap = current.caption, !cap.isEmpty {
+                        Text(cap)
+                            .font(.subheadline)
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.horizontal, 16).padding(.bottom, 10)
+                    }
+                    // Controls at the bottom so they're reachable one-handed.
+                    HStack(spacing: 14) {
                         CircleButton(system: "xmark") { dismiss() }
                         Spacer()
-                        if item.entries.count > 1 {
-                            Text("\(index + 1) of \(item.entries.count)")
-                                .font(.subheadline.weight(.semibold).monospacedDigit())
-                                .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(.ultraThinMaterial, in: Capsule())
+                        ShareLink(item: current.full) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(width: 46, height: 46)
+                                .background(.ultraThinMaterial, in: Circle())
                         }
-                        Spacer()
                         Menu {
-                            ShareLink(item: current.full) { Label("Share", systemImage: "square.and.arrow.up") }
                             Button { save() } label: { Label("Save to Photos", systemImage: "square.and.arrow.down") }
                             Button { UIPasteboard.general.url = current.full; Presenter.shared.show("Link copied") } label: { Label("Copy Link", systemImage: "link") }
                             Button { UIApplication.shared.open(current.full) } label: { Label("Open in Safari", systemImage: "safari") }
                         } label: {
                             Image(systemName: "ellipsis")
-                                .font(.system(size: 16, weight: .bold))
-                                .frame(width: 38, height: 38)
+                                .font(.system(size: 17, weight: .bold))
+                                .frame(width: 46, height: 46)
                                 .background(.ultraThinMaterial, in: Circle())
                         }
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    Spacer()
-                    if let cap = current.caption, !cap.isEmpty {
-                        Text(cap)
-                            .font(.subheadline)
-                            .foregroundStyle(.white)
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .padding(16)
-                    } else if !item.title.isEmpty {
-                        Text(item.title)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .lineLimit(2)
-                            .padding(.horizontal, 20).padding(.bottom, 12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
                 }
+                .foregroundStyle(.white)
                 .transition(.opacity)
             }
         }
@@ -151,8 +150,8 @@ struct CircleButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: system)
-                .font(.system(size: 15, weight: .bold))
-                .frame(width: 38, height: 38)
+                .font(.system(size: 16, weight: .bold))
+                .frame(width: 46, height: 46)
                 .background(.ultraThinMaterial, in: Circle())
         }
         .buttonStyle(.plain)

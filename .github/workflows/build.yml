@@ -51,3 +51,59 @@ jobs:
           name: Qorvex-1.0.${{ github.run_number }}
           path: Qorvex-1.0.${{ github.run_number }}.ipa
           retention-days: 30
+
+  screenshots:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 27
+        run: |
+          XC="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)"
+          [ -z "$XC" ] && XC=/Applications/Xcode.app
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project Qorvex.xcodeproj -scheme Qorvex -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath simbuild CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -5
+
+      - name: Boot an iPhone Duo simulator and take screenshots
+        run: |
+          mkdir -p shots
+          xcrun simctl list devicetypes > shots/devicetypes.txt
+          xcrun simctl list runtimes > shots/runtimes.txt
+          TYPE=$(xcrun simctl list devicetypes | grep -i "duo" | head -1 | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/')
+          [ -z "$TYPE" ] && TYPE=$(xcrun simctl list devicetypes | grep -i "iPhone" | tail -1 | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/')
+          RUNTIME=$(xcrun simctl list runtimes | grep -i "iOS" | tail -1 | sed -E 's/.* - (com\.apple[^ ]*).*/\1/')
+          echo "Device type: $TYPE  Runtime: $RUNTIME" | tee shots/device.txt
+          UDID=$(xcrun simctl create QorvexShots "$TYPE" "$RUNTIME")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          APP=$(find simbuild/Build/Products -name "Qorvex.app" -maxdepth 3 | head -1)
+          xcrun simctl install "$UDID" "$APP"
+          shoot() {
+            xcrun simctl terminate "$UDID" com.qorvex.reader 2>/dev/null || true
+            xcrun simctl launch "$UDID" com.qorvex.reader "$@"
+            sleep 8
+            xcrun simctl io "$UDID" screenshot "shots/$NAME.png"
+          }
+          NAME=home shoot -QXTab home
+          NAME=post shoot -QXTab home -QXOpenSample
+          NAME=search shoot -QXTab search
+          NAME=saved shoot -QXTab saved
+          NAME=settings shoot -QXTab settings
+          xcrun simctl ui "$UDID" appearance light || true
+          NAME=home-light shoot -QXTab home -QXOpenSample
+          ls -la shots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: duo-screenshots
+          path: shots
+          retention-days: 14

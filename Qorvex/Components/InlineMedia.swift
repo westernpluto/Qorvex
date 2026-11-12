@@ -67,9 +67,20 @@ struct YouTubeEmbed: UIViewRepresentable {
         v.isOpaque = false
         v.backgroundColor = .black
         v.scrollView.isScrollEnabled = false
-        if let u = URL(string: "https://www.youtube-nocookie.com/embed/\(id)?playsinline=1&autoplay=1&rel=0&modestbranding=1") {
-            v.load(URLRequest(url: u))
-        }
+        // YouTube refuses embeds without a referring origin ("video player configuration
+        // error"), so host the player in a small page with a real origin.
+        let origin = "https://qorvex.app"
+        let html = """
+        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+        <meta name="referrer" content="strict-origin-when-cross-origin">
+        <style>html,body{margin:0;padding:0;background:#000;height:100%;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
+        </head><body>
+        <iframe src="https://www.youtube.com/embed/\(id)?playsinline=1&autoplay=1&rel=0&origin=\(origin)&widget_referrer=\(origin)"
+          allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen
+          referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        </body></html>
+        """
+        v.loadHTMLString(html, baseURL: URL(string: origin))
         return v
     }
     func updateUIView(_ v: WKWebView, context: Context) {}

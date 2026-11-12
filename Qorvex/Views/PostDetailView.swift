@@ -11,6 +11,14 @@ struct CommentNode: Identifiable {
     let kind: Kind
     let depth: Int
     var descendants: Int = 0
+    var media: [GalleryEntry] = []
+
+    /// Builds a comment node: media extracted and links/placeholders removed from the text, once.
+    static func comment(_ c: Comment, depth: Int) -> CommentNode {
+        let media = c.inlineMedia
+        let text = InlineMedia.cleanedText(c.body ?? "", hasMedia: !media.isEmpty)
+        return CommentNode(id: c.id, kind: .comment(c, Markdown.parse(text)), depth: depth, media: media)
+    }
 }
 
 @Observable
@@ -58,7 +66,7 @@ final class CommentsModel {
             switch t {
             case .comment(let c):
                 let idx = out.count
-                out.append(CommentNode(id: c.id, kind: .comment(c, Markdown.parse(c.body ?? "")), depth: depth))
+                out.append(.comment(c, depth: depth))
                 let kids = flatten(c.replies?.children ?? [], depth: depth + 1, into: &out)
                 out[idx].descendants = kids
                 total += 1 + kids
@@ -106,6 +114,11 @@ final class CommentsModel {
             if let p = built.2 { setPost(p) }
             nodes = built.0
             collapsed = built.1
+            // One batched request for everyone's profile picture in this thread.
+            var pairs: [(fullname: String, name: String)] = []
+            if let p = post, let f = p.author_fullname { pairs.append((f, p.author)) }
+            for n in built.0 { if case .comment(let c, _) = n.kind, let f = c.author_fullname { pairs.append((f, c.author)) } }
+            Task { await AvatarStore.shared.ensure(pairs) }
             staleNote = r.stale ? "\(r.error?.localizedDescription ?? "Offline") · cached" : nil
             loaded = true
         } catch {
@@ -139,7 +152,7 @@ final class CommentsModel {
                     let parent = String((c.parent_id ?? "").dropFirst(3))
                     let d = depthOf[parent].map { $0 + 1 } ?? node.depth
                     depthOf[c.id] = d
-                    new.append(CommentNode(id: c.id, kind: .comment(c, Markdown.parse(c.body ?? "")), depth: d))
+                    new.append(.comment(c, depth: d))
                 case .more(let mm):
                     let parent = String((mm.parent_id ?? "").dropFirst(3))
                     let d = depthOf[parent].map { $0 + 1 } ?? node.depth
@@ -301,7 +314,7 @@ struct PostDetailView: View {
             }
         }
         .handlesLinks(router)
-        .navigationTitle(model.post.map { "r/\($0.subreddit)" } ?? "Post")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -336,7 +349,7 @@ struct PostDetailView: View {
     private func nodeRow(_ node: CommentNode) -> some View {
         switch node.kind {
         case .comment(let c, let blocks):
-            CommentRow(comment: c, blocks: blocks, depth: node.depth, collapsed: model.collapsed.contains(node.id),
+            CommentRow(comment: c, blocks: blocks, media: node.media, depth: node.depth, collapsed: model.collapsed.contains(node.id),
                        hidden: node.descendants, isOP: c.author == model.post?.author && c.author != "[deleted]",
                        highlighted: c.id == ref.commentID)
                 .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
@@ -365,6 +378,13 @@ struct PostDetailView: View {
                     Button(role: .destructive) { library.filters.users.append(c.author); Presenter.shared.show("u/\(c.author) filtered") } label: {
                         Label("Filter User's Posts", systemImage: "nosign")
                     }
+                } preview: {
+                    // A compact card instead of the whole row (which can span both panes).
+                    CommentRow(comment: c, blocks: blocks, media: [], depth: 0, collapsed: false, hidden: 0, isOP: false, highlighted: false)
+                        .padding(.horizontal, 16).padding(.vertical, 4)
+                        .frame(width: 340)
+                        .background(Color.cardBackground)
+                        .environment(router)
                 }
         case .more(let m):
             // Reddit blocks the "load more" endpoint for apps, so open the parent's thread instead
@@ -382,29 +402,39 @@ struct PostDetailView: View {
                     Presenter.shared.openExternal(p.webURL)
                 }
             } label: {
-                HStack(spacing: 8) {
-                    if model.loadingMore.contains(node.id) { ProgressView().controlSize(.small) }
-                    else { Image(systemName: Reddit.apiActive || (m.parent_id ?? "").hasPrefix("t1_") ? "arrow.turn.down.right" : "safari") }
-                    Text(moreLabel(m))
+                ThreadRail(depth: node.depth) {
+                    HStack(spacing: 8) {
+                        if model.loadingMore.contains(node.id) { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "arrow.turn.down.right") }
+                        Text(moreLabel(m))
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
-                .padding(.vertical, 10)
             }
             .buttonStyle(.plain)
-            .padding(.leading, CGFloat(node.depth) * 12 + 10)
-            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+            .listRowSeparator(.hidden, edges: .top)
+            .listRowSeparator(.visible, edges: .bottom)
+            .listRowSeparatorTint(Color.secondary.opacity(0.2))
             .listRowBackground(Color.cardBackground)
         case .continueThread(let parent):
             Button { router.push(.post(PostRef(id: ref.id, commentID: String(parent.dropFirst(3)), preview: model.post))) } label: {
-                Label("Continue this thread", systemImage: "arrow.right.circle")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.vertical, 10)
+                ThreadRail(depth: node.depth) {
+                    Label("Continue this thread", systemImage: "arrow.right.circle")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
             }
             .buttonStyle(.plain)
-            .padding(.leading, CGFloat(node.depth) * 12 + 10)
-            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+            .listRowSeparator(.hidden, edges: .top)
+            .listRowSeparator(.visible, edges: .bottom)
+            .listRowSeparatorTint(Color.secondary.opacity(0.2))
             .listRowBackground(Color.cardBackground)
         }
     }
@@ -468,17 +498,26 @@ struct PostDetailHeader: View {
             HStack(spacing: 8) {
                 Button { router.push(.feed(.subreddit(post.subreddit))) } label: {
                     HStack(spacing: 8) {
-                        Avatar(name: post.subreddit, size: 28)
-                        Text("r/\(post.subreddit)").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                        Avatar(name: post.subreddit, url: post.subredditIcon, size: 30)
+                        Text("r/\(post.subreddit)").font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .layoutPriority(2)
+                Button { router.push(.user(post.author)) } label: {
+                    HStack(spacing: 6) {
+                        Avatar(name: post.author, url: AvatarStore.shared.url(for: post.author), size: 20)
+                        Text("u/\(post.author)").lineLimit(1).truncationMode(.tail)
                     }
                 }
                 .buttonStyle(.plain)
-                Button { router.push(.user(post.author)) } label: { Text("u/\(post.author)") }.buttonStyle(.plain)
-                Text("· \(post.created.ago)")
-                Spacer()
+                Text("· \(post.created.ago)").fixedSize()
+                Spacer(minLength: 0)
             }
             .font(.footnote)
             .foregroundStyle(.secondary)
+            .lineLimit(1)
 
             Text(post.title)
                 .font(.title3.weight(.bold))
@@ -553,6 +592,7 @@ struct PostDetailHeader: View {
 struct CommentRow: View {
     let comment: Comment
     let blocks: [MDBlock]
+    var media: [GalleryEntry] = []
     let depth: Int
     let collapsed: Bool
     let hidden: Int
@@ -572,6 +612,7 @@ struct CommentRow: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 5) {
+                    Avatar(name: comment.author, url: AvatarStore.shared.url(for: comment.author), size: 20)
                     Text(comment.author)
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(authorColor)
@@ -602,7 +643,7 @@ struct CommentRow: View {
                 if !collapsed {
                     MarkdownView(blocks: blocks)
                         .font(.subheadline)
-                    ForEach(comment.inlineMedia) { InlineMediaView(entry: $0) }
+                    ForEach(media) { InlineMediaView(entry: $0) }
                 }
             }
             .padding(.vertical, 9)
@@ -618,6 +659,27 @@ struct CommentRow: View {
         if comment.distinguished == "admin" { return .red }
         if isOP { return .accentColor }
         return .primary
+    }
+}
+
+/// Indents a row to its thread depth with the same colored rail as comments, so "load more"
+/// rows visibly belong to the thread they expand.
+struct ThreadRail<Content: View>: View {
+    let depth: Int
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            if depth > 0 {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(CommentRow.rail[(depth - 1) % CommentRow.rail.count].opacity(0.75))
+                    .frame(width: 2)
+                    .padding(.vertical, 6)
+            }
+            content()
+        }
+        .padding(.leading, CGFloat(max(0, depth - 1)) * 12)
+        .alignmentGuide(.listRowSeparatorLeading) { _ in CGFloat(max(0, depth - 1)) * 12 }
     }
 }
 

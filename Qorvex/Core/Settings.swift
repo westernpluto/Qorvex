@@ -164,7 +164,7 @@ final class AppSettings {
     var blurSpoilers: Bool { didSet { d.set(blurSpoilers, forKey: "blurSpoilers") } }
     var autoplay: AutoplayMode { didSet { d.set(autoplay.rawValue, forKey: "autoplay") } }
     var startMuted: Bool { didSet { d.set(startMuted, forKey: "startMuted") } }
-    var dataSaver: Bool { didSet { d.set(dataSaver, forKey: "dataSaver") } }
+    var dataSaver: Bool { didSet { d.set(dataSaver, forKey: "dataSaver"); RenderCache<PostMedia>.media.clear() } }
     var hideRead: Bool { didSet { d.set(hideRead, forKey: "hideRead") } }
     var dimRead: Bool { didSet { d.set(dimRead, forKey: "dimRead") } }
     var showFlair: Bool { didSet { d.set(showFlair, forKey: "showFlair") } }

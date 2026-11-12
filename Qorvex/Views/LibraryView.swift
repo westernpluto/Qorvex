@@ -1,87 +1,142 @@
 import SwiftUI
 
-/// The Saved tab: saved posts and reading history, nothing else.
-struct SavedTab: View {
-    enum Section: String, CaseIterable { case saved = "Saved", history = "History" }
-    @State private var section: Section = .saved
+/// Saved posts from the Reddit account (paged).
+@Observable
+final class AccountSavedModel {
+    var items: [UserItem] = []
+    var after: String?
+    var loading = false
+    var error: String?
+    var loaded = false
 
-    var body: some View {
-        Group {
-            switch section {
-            case .saved: SavedView()
-            case .history: HistoryView()
+    @MainActor
+    func load(reset: Bool = false, force: Bool = false) async {
+        guard NetworkStatus.shared.signedIn, let name = NetworkStatus.shared.username else { return }
+        if loading || (!reset && loaded && after == nil) { return }
+        loading = true; error = nil
+        do {
+            let r = try await Reddit.userSaved(name, after: reset ? nil : after, force: force)
+            if reset { items = [] }
+            for t in r.value.data.children {
+                switch t {
+                case .post(let p): items.append(.post(p))
+                case .comment(let c): items.append(.comment(c))
+                default: break
+                }
             }
-        }
-        .safeAreaInset(edge: .top) {
-            Picker("", selection: $section) {
-                ForEach(Section.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .background(.bar)
-        }
+            after = r.value.data.after
+            loaded = true
+        } catch { self.error = error.localizedDescription }
+        loading = false
     }
 }
 
-struct SavedView: View {
+/// The Saved tab: your saved posts and reading history.
+struct SavedTab: View {
+    enum Section: String, CaseIterable { case saved = "Saved", history = "History" }
+    @State private var section: Section = .saved
+    @State private var account = AccountSavedModel()
+    @State private var confirmClear = false
     @Environment(Router.self) private var router
     private var library: Library { .shared }
 
     var body: some View {
         List {
-            if library.saved.isEmpty {
-                EmptyState(icon: "bookmark", title: "Nothing saved", message: "Swipe right on a post to save it. Saved posts work offline.").plainRow()
+            Picker("", selection: $section) {
+                ForEach(Section.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
-            ForEach(library.saved) { s in
-                PostRow(post: s.post)
-                    .padding(.horizontal, 12).padding(.vertical, 5)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .swipeActions { Button(role: .destructive) { library.toggleSave(s.post) } label: { Label("Unsave", systemImage: "bookmark.slash") } }
-                    .contextMenu { PostMenuItems(post: s.post, router: router) }
+            .pickerStyle(.segmented)
+            .plainRow()
+
+            switch section {
+            case .saved: savedRows
+            case .history: historyRows
             }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.appBackground)
-        .navigationTitle("Saved")
-        .navigationBarTitleDisplayMode(.large)
-    }
-}
-
-struct HistoryView: View {
-    @Environment(Router.self) private var router
-    @State private var confirm = false
-    private var library: Library { .shared }
-
-    var body: some View {
-        List {
-            if library.history.isEmpty {
-                EmptyState(icon: "clock", title: "No history", message: "Posts you open show up here.").plainRow()
-            }
-            ForEach(library.history.prefix(400)) { h in
-                Button { router.open(PostRef(id: h.id)) } label: {
-                    HStack(spacing: 12) {
-                        Avatar(name: h.subreddit, size: 32)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(h.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(2)
-                            Text("r/\(h.subreddit) · \(h.readAt.ago) ago").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+        .navigationTitle(section.rawValue)
+        .toolbar {
+            if section == .history {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .destructive) { confirmClear = true } label: { Label("Clear History", systemImage: "trash") }
+                        .disabled(library.history.isEmpty)
                 }
             }
         }
-        .listStyle(.plain)
-        .navigationTitle("History")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(role: .destructive) { confirm = true } label: { Label("Clear History", systemImage: "trash") }.disabled(library.history.isEmpty)
-            }
-        }
-        .confirmationDialog("Clear reading history?", isPresented: $confirm, titleVisibility: .visible) {
+        .confirmationDialog("Clear reading history?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear History", role: .destructive) { library.clearHistory() }
+        }
+        .refreshable { await account.load(reset: true, force: true) }
+        .task { if !account.loaded { await account.load(reset: true) } }
+        .onChange(of: NetworkStatus.shared.username) { _, _ in Task { await account.load(reset: true) } }
+    }
+
+    @ViewBuilder private var savedRows: some View {
+        if !NetworkStatus.shared.signedIn {
+            SignInBanner().plainRow()
+            localSavedRows
+        } else if account.items.isEmpty {
+            if account.loading {
+                ProgressView().frame(maxWidth: .infinity).padding(30).plainRow()
+            } else if let e = account.error {
+                ErrorState(message: e) { Task { await account.load(reset: true) } }.plainRow()
+            } else {
+                EmptyState(icon: "bookmark", title: "Nothing saved", message: "Posts you save on Reddit or here show up in this list.").plainRow()
+            }
+        } else {
+            ForEach(account.items) { item in
+                Group {
+                    switch item {
+                    case .post(let p):
+                        PostRow(post: p).contextMenu { PostMenuItems(post: p, router: router) }
+                    case .comment(let c):
+                        UserCommentRow(comment: c)
+                            .contentShape(Rectangle())
+                            .onTapGesture { if let pid = c.postID { router.open(PostRef(id: pid, commentID: c.id)) } }
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .onAppear { if item.id == account.items.last?.id { Task { await account.load() } } }
+            }
+            if account.loading { ProgressView().frame(maxWidth: .infinity).padding().plainRow() }
+        }
+    }
+
+    @ViewBuilder private var localSavedRows: some View {
+        ForEach(library.saved) { s in
+            PostRow(post: s.post)
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .swipeActions { Button(role: .destructive) { library.toggleSave(s.post) } label: { Label("Unsave", systemImage: "bookmark.slash") } }
+                .contextMenu { PostMenuItems(post: s.post, router: router) }
+        }
+    }
+
+    @ViewBuilder private var historyRows: some View {
+        if library.history.isEmpty {
+            EmptyState(icon: "clock", title: "No history", message: "Posts you open show up here.").plainRow()
+        }
+        ForEach(library.history.prefix(400)) { h in
+            Button { router.open(PostRef(id: h.id)) } label: {
+                HStack(spacing: 12) {
+                    Avatar(name: h.subreddit, url: library.icon(for: h.subreddit), size: 34)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(h.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(2)
+                        Text("r/\(h.subreddit) · \(h.readAt.ago) ago").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .listRowBackground(Color.clear)
         }
     }
 }

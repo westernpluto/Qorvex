@@ -92,6 +92,9 @@ final class Router {
     /// Set on the detail router: communities, users and other browse screens open in the list pane.
     @ObservationIgnored weak var list: Router?
     @ObservationIgnored var splitActive = false
+    /// The post pushed on the narrow (folded) layout, so it can move to the detail pane on unfold.
+    @ObservationIgnored var compactPost: PostRef?
+    @ObservationIgnored var compactDepth = 0
 
     func push(_ r: Route) {
         if let list {
@@ -121,6 +124,8 @@ final class Router {
             columns = .all
         } else {
             path.append(Route.post(ref))
+            compactPost = ref
+            compactDepth = path.count
         }
     }
 }

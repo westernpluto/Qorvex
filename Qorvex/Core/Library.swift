@@ -33,14 +33,17 @@ final class Library {
     static let shared = Library()
 
     var subs: [String] { didSet { persist() } }
-    var saved: [SavedPost] { didSet { persist() } }
+    var saved: [SavedPost] { didSet { savedIDs = Set(saved.map(\.id)); persist() } }
     var history: [HistoryItem] { didSet { persistSoon() } }
     var hidden: Set<String> { didSet { persistSoon() } }
     var filters: Filters { didSet { persist() } }
     var feeds: [CustomFeed] { didSet { persist() } }
     var recentSearches: [String] { didSet { persist() } }
+    /// Community icons learned from the account's subscriptions and feeds (lowercased name → URL).
+    var subIcons: [String: String] { didSet { persistSoon() } }
 
     @ObservationIgnored private var readIDs: Set<String> = []
+    @ObservationIgnored private var savedIDs: Set<String> = []
     @ObservationIgnored private var pending: DispatchWorkItem?
 
     private struct Snapshot: Codable {
@@ -51,6 +54,7 @@ final class Library {
         var filters: Filters
         var feeds: [CustomFeed]
         var recentSearches: [String]?
+        var subIcons: [String: String]?
     }
 
     static let defaultSubs = ["pics", "technology", "science", "worldnews", "todayilearned", "space", "aww", "EarthPorn", "dataisbeautiful", "movies", "gaming", "interestingasfuck"]
@@ -70,11 +74,13 @@ final class Library {
         filters = snap?.filters ?? Filters()
         feeds = snap?.feeds ?? []
         recentSearches = snap?.recentSearches ?? []
+        subIcons = snap?.subIcons ?? [:]
         readIDs = Set(history.map(\.id))
+        savedIDs = Set(saved.map(\.id))
     }
 
     private func snapshot() -> Snapshot {
-        Snapshot(subs: subs, saved: saved, history: history, hidden: Array(hidden.suffix(4000)), filters: filters, feeds: feeds, recentSearches: recentSearches)
+        Snapshot(subs: subs, saved: saved, history: history, hidden: Array(hidden.suffix(4000)), filters: filters, feeds: feeds, recentSearches: recentSearches, subIcons: subIcons)
     }
 
     private func persist() {
@@ -100,11 +106,25 @@ final class Library {
     }
 
     // MARK: Saved
-    func isSaved(_ id: String) -> Bool { saved.contains { $0.id == id } }
+    func isSaved(_ id: String) -> Bool { _ = saved.isEmpty; return savedIDs.contains(id) } // touch `saved` so views observe changes
+
+    func icon(for sub: String) -> URL? { subIcons[sub.lowercased()].flatMap(URL.init(string:)) }
+
+    func learnIcon(_ sub: String, _ url: URL?) {
+        guard let url, subIcons[sub.lowercased()] != url.absoluteString else { return }
+        subIcons[sub.lowercased()] = url.absoluteString
+    }
     @discardableResult
     func toggleSave(_ post: Post) -> Bool {
-        if isSaved(post.id) { saved.removeAll { $0.id == post.id }; return false }
-        saved.insert(SavedPost(post: post, savedAt: Date()), at: 0); return true
+        let on: Bool
+        if isSaved(post.id) { saved.removeAll { $0.id == post.id }; on = false }
+        else { saved.insert(SavedPost(post: post, savedAt: Date()), at: 0); on = true }
+        // Mirror to the Reddit account.
+        Task { @MainActor in
+            guard NetworkStatus.shared.signedIn, !SampleData.isSample(post.id) else { return }
+            try? await RedditClient.shared.save("t3_\(post.id)", save: on)
+        }
+        return on
     }
 
     // MARK: History
@@ -157,5 +177,6 @@ final class Library {
         subs = s.subs; saved = s.saved; history = s.history; hidden = Set(s.hidden)
         filters = s.filters; feeds = s.feeds; recentSearches = s.recentSearches ?? []
         readIDs = Set(history.map(\.id))
+        savedIDs = Set(saved.map(\.id))
     }
 }

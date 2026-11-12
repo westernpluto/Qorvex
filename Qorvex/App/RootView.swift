@@ -14,8 +14,19 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// Launch flags used by CI to photograph specific screens in the simulator.
+enum LaunchArgs {
+    static let args = ProcessInfo.processInfo.arguments
+    static func value(_ key: String) -> String? {
+        guard let i = args.firstIndex(of: key), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }
+    static var initialTab: AppTab { value("-QXTab").flatMap(AppTab.init(rawValue:)) ?? .home }
+    @MainActor static var openSample = args.contains("-QXOpenSample")
+}
+
 struct RootView: View {
-    @State private var tab: AppTab = .home
+    @State private var tab: AppTab = LaunchArgs.initialTab
     @Bindable private var presenter = Presenter.shared
     private var settings: AppSettings { .shared }
 
@@ -45,13 +56,9 @@ struct RootView: View {
         }
         .fullScreenCover(item: $presenter.viewer) { v in MediaViewer(item: v) }
         .fullScreenCover(item: $presenter.video) { v in
+            // The system player has its own close button; don't stack a second one on top.
             FullscreenPlayer(url: v.url)
                 .ignoresSafeArea()
-                .overlay(alignment: .topLeading) {
-                    CircleButton(system: "xmark") { presenter.video = nil }
-                        .foregroundStyle(.white)
-                        .padding(.leading, 16).padding(.top, 8)
-                }
         }
         .task {
             await RedditAccount.refresh()
@@ -65,7 +72,7 @@ struct RootView: View {
     @ViewBuilder
     private func rootContent(_ t: AppTab) -> some View {
         switch t {
-        case .home: FeedView(source: .home)
+        case .home: HomeView()
         case .search: SearchView()
         case .saved: SavedTab()
         case .settings: SettingsView()
@@ -93,6 +100,7 @@ struct AdaptiveStack<Root: View>: View {
     @State private var listRouter = Router()
     @State private var detailRouter = Router()
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var wasWide: Bool?
     private var settings: AppSettings { .shared }
 
     var body: some View {
@@ -152,12 +160,29 @@ struct AdaptiveStack<Root: View>: View {
     /// outer display posts are pushed onto the stack like a normal iPhone app.
     private func configure() {
         let wide = settings.twoPane && sizeClass == .regular
+        // Carry an open post across folding/unfolding so it always lands where posts belong.
+        if let was = wasWide, was != wide {
+            if wide, let ref = listRouter.compactPost, listRouter.path.count == listRouter.compactDepth, !listRouter.path.isEmpty {
+                listRouter.path.removeLast()
+                listRouter.compactPost = nil
+                detailRouter.path = NavigationPath()
+                detailRouter.detailRoot = ref
+            } else if !wide, let ref = detailRouter.detailRoot {
+                detailRouter.detailRoot = nil
+                listRouter.compactColumn = .sidebar
+                listRouter.path.append(Route.post(ref))
+                listRouter.compactPost = ref
+                listRouter.compactDepth = listRouter.path.count
+            }
+        }
+        wasWide = wide
         listRouter.detail = detailRouter
         detailRouter.list = wide ? listRouter : nil
         listRouter.columns = .all
         listRouter.splitActive = wide
         detailRouter.splitActive = false
-    }}
+    }
+}
 
 struct RouteDestination: View {
     let route: Route
@@ -167,8 +192,8 @@ struct RouteDestination: View {
         case .post(let ref): PostDetailView(ref: ref)
         case .user(let n): UserView(name: n)
         case .search(let sub): SearchView(restrictTo: sub)
-        case .saved: SavedView()
-        case .history: HistoryView()
+        case .saved: SavedTab()
+        case .history: SavedTab()
         case .discover: DiscoverView()
         }
     }

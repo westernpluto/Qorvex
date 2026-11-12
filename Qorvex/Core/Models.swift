@@ -83,6 +83,9 @@ struct Post: Codable, Identifiable, Hashable {
     var media_metadata: [String: MediaMeta]?
     var crosspost_parent_list: [Post]?
     var distinguished: String?
+    var author_fullname: String?
+    /// Community details included with listings (`sr_detail=1`), so icons cost no extra request.
+    var sr_detail: Subreddit?
 
     static func == (a: Post, b: Post) -> Bool { a.id == b.id }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -99,6 +102,7 @@ struct Post: Codable, Identifiable, Hashable {
         return !(d.contains("reddit.com") || d.contains("redd.it") || d.hasPrefix("self."))
     }
     var created: Date { Date(timeIntervalSince1970: created_utc) }
+    var subredditIcon: URL? { sr_detail?.iconURL ?? Library.shared.icon(for: subreddit) }
 }
 
 struct Preview: Codable {
@@ -210,6 +214,7 @@ struct Comment: Decodable, Identifiable {
     var permalink: String?
     var replies: Replies?
     var media_metadata: [String: MediaMeta]?
+    var author_fullname: String?
 
     var created: Date { Date(timeIntervalSince1970: created_utc) }
     var postID: String? { link_id.map { String($0.dropFirst(3)) } }
@@ -224,7 +229,7 @@ struct More: Decodable {
 
 // MARK: - Subreddits & users
 
-struct Subreddit: Decodable, Identifiable {
+struct Subreddit: Codable, Identifiable {
     var id: String?
     let display_name: String
     var title: String?

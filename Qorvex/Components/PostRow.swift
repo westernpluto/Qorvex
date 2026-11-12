@@ -107,21 +107,22 @@ struct PostRow: View {
             if showSubreddit {
                 Button { router.push(.feed(.subreddit(post.subreddit))) } label: {
                     HStack(spacing: 6) {
-                        Avatar(name: post.subreddit, size: 20)
-                        Text("r/\(post.subreddit)").fontWeight(.semibold).foregroundStyle(.primary)
+                        Avatar(name: post.subreddit, url: post.subredditIcon, size: 22)
+                        Text("r/\(post.subreddit)").fontWeight(.semibold).foregroundStyle(.primary).lineLimit(1)
                     }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .layoutPriority(2)
             }
             Button { router.push(.user(post.author)) } label: {
-                Text(showSubreddit ? post.author : "u/\(post.author)").lineLimit(1)
+                Text(showSubreddit ? post.author : "u/\(post.author)").lineLimit(1).truncationMode(.tail)
             }
             .buttonStyle(.plain)
-            Text("·")
-            Text(post.created.ago)
+            .layoutPriority(0)
+            Text("· \(post.created.ago)").fixedSize().layoutPriority(1)
             if settings.layout == .card, post.isExternalLink, let d = post.domain {
-                Text("·")
-                Text(d).lineLimit(1)
+                Text("· \(d)").lineLimit(1).layoutPriority(-1)
             }
         }
         .font(.footnote)
@@ -139,7 +140,7 @@ struct PostRow: View {
             }
             PostMenu(post: post) {
                 Image(systemName: "ellipsis")
-                    .frame(width: 32, height: 24)
+                    .frame(width: 44, height: 36)
                     .contentShape(Rectangle())
             }
         }
@@ -156,8 +157,8 @@ struct PostRow: View {
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
             PostBadges(post: post)
-            if case .text = post.mediaKind, let t = post.selftext, !t.isEmpty {
-                Text(Markdown.plain(String(t.prefix(400))))
+            if case .text = post.mediaKind, let t = post.previewText {
+                Text(t)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
@@ -292,12 +293,12 @@ struct PostMenuItems: View {
 }
 
 extension Color {
-    static var cardBackground: Color { Color(uiColor: UIColor { t in
+    static let cardBackground = Color(uiColor: UIColor { t in
         if t.userInterfaceStyle == .dark { return AppSettings.shared.theme == .black ? UIColor(white: 0.07, alpha: 1) : UIColor(white: 0.11, alpha: 1) }
         return .white
-    }) }
-    static var appBackground: Color { Color(uiColor: UIColor { t in
+    })
+    static let appBackground = Color(uiColor: UIColor { t in
         if t.userInterfaceStyle == .dark { return AppSettings.shared.theme == .black ? .black : UIColor(white: 0.04, alpha: 1) }
         return UIColor(red: 0.95, green: 0.95, blue: 0.97, alpha: 1)
-    }) }
+    })
 }

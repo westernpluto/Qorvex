@@ -23,6 +23,23 @@ struct VideoInfo: Hashable {
     var playURL: URL? { hls ?? mp4 }
 }
 
+/// Small thread-safe caches for values derived from posts during rendering.
+final class RenderCache<Value> {
+    static var media: RenderCache<PostMedia> { MediaHolder.cache }
+    static var text: RenderCache<String> { TextHolder.cache }
+    private var store: [String: Value] = [:]
+    private let lock = NSLock()
+    func value(for key: String) -> Value? { lock.lock(); defer { lock.unlock() }; return store[key] }
+    func set(_ v: Value, for key: String) {
+        lock.lock(); defer { lock.unlock() }
+        if store.count > 3000 { store.removeAll(keepingCapacity: true) }
+        store[key] = v
+    }
+    func clear() { lock.lock(); store.removeAll(); lock.unlock() }
+}
+private enum MediaHolder { static let cache = RenderCache<PostMedia>() }
+private enum TextHolder { static let cache = RenderCache<String>() }
+
 enum PostMedia {
     case image(GalleryEntry)
     case gallery([GalleryEntry])
@@ -50,9 +67,21 @@ extension Post {
         previewImage(target: 320)?.url ?? URL.nonEmpty(thumbnail)
     }
 
+    /// Cached per post: views read this many times per frame while scrolling.
     var mediaKind: PostMedia {
-        let p = crosspost_parent_list?.first ?? self
-        return p.ownMedia
+        if let cached = RenderCache<PostMedia>.media.value(for: id) { return cached }
+        let m = (crosspost_parent_list?.first ?? self).ownMedia
+        RenderCache<PostMedia>.media.set(m, for: id)
+        return m
+    }
+
+    /// Plain-text preview of a text post's body (cached; markdown parsing is expensive).
+    var previewText: String? {
+        guard let t = selftext, !t.isEmpty else { return nil }
+        if let cached = RenderCache<String>.text.value(for: id) { return cached }
+        let plain = Markdown.plain(String(t.prefix(400)))
+        RenderCache<String>.text.set(plain, for: id)
+        return plain
     }
 
     private var ownMedia: PostMedia {
@@ -134,9 +163,45 @@ enum InlineMedia {
         pattern: #"https?://(?:i\.redd\.it|preview\.redd\.it|i\.imgur\.com|media\d?\.giphy\.com|i\.giphy\.com)/[^\s)\]]+?\.(?:jpe?g|png|webp|gif|gifv|mp4)(?:\?[^\s)\]]*)?"#,
         options: [.caseInsensitive])
 
+    private static let tokenRE = try! NSRegularExpression(pattern: #"!\[(gif|img)\]\(([^)\s]+)\)"#, options: [.caseInsensitive])
+    private static let mediaHosts = #"(?:i\.redd\.it|preview\.redd\.it|i\.imgur\.com|media\d?\.giphy\.com|i\.giphy\.com)"#
+    private static let linkRE = try! NSRegularExpression(pattern: #"\[[^\]]*\]\(\s*<?https?://"# + mediaHosts + #"/[^)\s]+>?\s*\)"#, options: [.caseInsensitive])
+
+    /// Body text with media tokens and links to media removed (the media is shown inline instead).
+    static func cleanedText(_ text: String, hasMedia: Bool) -> String {
+        var s = text
+        for re in [tokenRE, linkRE, urlRE] {
+            s = re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "")
+        }
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if hasMedia && (s == "[removed]" || s == "[deleted]") { return "" }
+        return s
+    }
+
     static func entries(meta: [String: MediaMeta]?, text: String?, idPrefix: String) -> [GalleryEntry] {
         var out: [GalleryEntry] = []
         var seen = Set<String>()
+        // Media referenced by token, e.g. ![gif](giphy|ID), ![gif](emote|pack|name), ![img](id).
+        if let text {
+            for m in tokenRE.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                guard let kr = Range(m.range(at: 1), in: text), let vr = Range(m.range(at: 2), in: text) else { continue }
+                let kind = text[kr].lowercased()
+                let value = String(text[vr])
+                if meta?[value] != nil { continue } // covered by media_metadata below
+                let parts = value.split(separator: "|").map(String.init)
+                var still: URL?, mp4: URL?
+                if parts.first == "giphy", parts.count >= 2 {
+                    still = URL(string: "https://i.giphy.com/media/\(parts[1])/giphy.gif")
+                    mp4 = URL(string: "https://i.giphy.com/media/\(parts[1])/giphy.mp4")
+                } else if parts.first == "emote", parts.count >= 3 {
+                    still = URL(string: "https://www.redditstatic.com/marketplace-assets/v1/core/emotes/snoomoji_emotes/\(parts[1])/\(parts[2]).gif")
+                } else if parts.count == 1, !value.contains("/") {
+                    still = URL(string: "https://i.redd.it/\(value).\(kind == "gif" ? "gif" : "jpg")")
+                }
+                guard let still, seen.insert(still.absoluteString).inserted else { continue }
+                out.append(GalleryEntry(id: idPrefix + "t\(out.count)", url: still, full: still, size: nil, caption: nil, mp4: mp4))
+            }
+        }
         for (key, m) in (meta ?? [:]).sorted(by: { $0.key < $1.key }) {
             guard m.status == nil || m.status == "valid", let s = m.s else { continue }
             let mp4 = s.mp4.flatMap(URL.init(string:))

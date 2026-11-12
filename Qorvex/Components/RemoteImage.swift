@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 /// Memory + disk image cache. Images come from Reddit's CDN and don't count toward the JSON budget.
 final class ImageLoader {
@@ -20,11 +21,25 @@ final class ImageLoader {
 
     func load(_ url: URL) async -> UIImage? {
         if let img = cached(url) { return img }
-        guard let (data, _) = try? await session.data(from: url), let raw = UIImage(data: data) else { return nil }
-        let img = await raw.byPreparingForDisplay() ?? raw
+        guard let (data, _) = try? await session.data(from: url) else { return nil }
+        // Decode at display size, off the main thread, so big images don't stutter scrolling.
+        guard let img = await Task.detached(priority: .userInitiated, operation: { ImageLoader.downsample(data, maxPixel: 1600) }).value else { return nil }
         let cost = Int(img.size.width * img.size.height * img.scale * img.scale * 4)
         memory.setObject(img, forKey: url as NSURL, cost: cost)
         return img
+    }
+
+    static func downsample(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+        let opts = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let src = CGImageSourceCreateWithData(data as CFData, opts) else { return UIImage(data: data) }
+        let thumbOpts = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ] as CFDictionary
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOpts) else { return UIImage(data: data) }
+        return UIImage(cgImage: cg)
     }
 
     func clear() {

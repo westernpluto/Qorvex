@@ -432,6 +432,31 @@ actor RedditClient {
 
     enum WhoAmI { case signedIn(String), signedOut, unknown }
 
+    /// Save or unsave a post/comment on the user's Reddit account.
+    func save(_ fullname: String, save: Bool) async throws {
+        try await postForm(save ? "/api/save" : "/api/unsave", body: "id=\(fullname)")
+    }
+
+    /// Authenticated form POST on www using the web session and modhash.
+    private func postForm(_ path: String, body: String) async throws {
+        let cookie = await RedditAccount.cookieHeader()
+        guard cookie.contains("reddit_session="), let modhash else { throw RedditError.loginRequired }
+        if userAgent == nil { userAgent = await MainActor.run { WebTransport.safariUserAgent } }
+        try await acquireSlot()
+        var req = URLRequest(url: URL(string: "https://www.reddit.com" + path)!)
+        req.httpMethod = "POST"
+        req.httpShouldHandleCookies = false
+        req.setValue(cookie, forHTTPHeaderField: "Cookie")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue(modhash, forHTTPHeaderField: "X-Modhash")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data(body.utf8)
+        let (data, response) = try await session.data(for: req, delegate: redirectCatcher)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        await log("write", req.url!, status, (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? "", nil, data)
+        guard (200..<300).contains(status) else { throw RedditError.http(status) }
+    }
+
     /// Join or leave a community on the user's Reddit account (POST /api/subscribe on www,
     /// authenticated by the web session and its modhash).
     func subscribe(_ name: String, join: Bool) async throws {
@@ -627,7 +652,7 @@ enum Reddit {
             page = base.isEmpty ? "/" : base
         }
         let t: String? = api && sort.needsTime ? time.rawValue : nil
-        return try await RedditClient.shared.get(page + ".json" + q(["limit": api ? "25" : nil, "t": t, "after": after]), as: ListingResponse.self, force: force)
+        return try await RedditClient.shared.get(page + ".json" + q(["limit": api ? "25" : nil, "t": t, "after": after, "sr_detail": api ? "1" : nil]), as: ListingResponse.self, force: force)
     }
 
     /// A post's own page + `.json` (e.g. `/r/pics/comments/abc/title/.json`), as Safari would load it.
@@ -677,16 +702,25 @@ enum Reddit {
     }
 
     /// The signed-in account's subscribed communities (`/subreddits/mine/subscriber/.json`).
-    static func mySubscriptions() async throws -> [String] {
-        var names: [String] = []
+    static func mySubscriptions() async throws -> [(name: String, icon: URL?)] {
+        var out: [(name: String, icon: URL?)] = []
         var after: String? = nil
         for _ in 0..<5 {
-            let r = try await RedditClient.shared.get("/subreddits/mine/subscriber.json" + q(["limit": "100", "after": after]), as: ListingResponse.self, force: true)
-            for t in r.value.data.children { if case .subreddit(let s) = t { names.append(s.display_name) } }
+            let r = try await RedditClient.shared.get("/subreddits/mine/subscriber.json" + q(["limit": "100", "after": after]), as: ListingResponse.self, kind: .about)
+            for t in r.value.data.children { if case .subreddit(let s) = t { out.append((s.display_name, s.iconURL)) } }
             after = r.value.data.after
             if after == nil { break }
         }
-        return names
+        return out
+    }
+
+    /// Profile info for up to 100 accounts in one request.
+    static func userData(ids: [String]) async throws -> [String: UserDataInfo] {
+        try await RedditClient.shared.get("/api/user_data_by_account_ids.json" + q(["ids": ids.joined(separator: ",")]), as: [String: UserDataInfo].self, kind: .about).value
+    }
+
+    static func userSaved(_ name: String, after: String?, force: Bool = false) async throws -> Fetched<ListingResponse> {
+        try await RedditClient.shared.get("/user/\(name)/saved.json" + q(["after": after, "limit": "25", "sr_detail": apiActive ? "1" : nil]), as: ListingResponse.self, force: force)
     }
 
     static func user(_ name: String) async throws -> RedditUser {
