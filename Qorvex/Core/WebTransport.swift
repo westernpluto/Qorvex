@@ -2,29 +2,39 @@ import Foundation
 import WebKit
 import SwiftUI
 
-/// Fetches Reddit JSON through a real WebKit browser engine. A hidden WKWebView opens a page on
-/// reddit.com, then runs `fetch()` from inside it, so requests carry the same cookies, headers and
-/// TLS fingerprint as Safari. Cookies live in the shared website data store, so passing Reddit's
-/// check once (see `RedditVerifyView`) also unlocks these requests.
+/// Fetches Reddit JSON through a real WebKit browser engine, using the user's signed-in reddit.com
+/// session from the shared website data store.
+///
+/// Two methods: a same-origin `fetch()` from inside a reddit.com page (fast), and — if Reddit still
+/// treats that as signed out — a top-level navigation to the JSON URL, exactly like typing it into
+/// Safari, then reading the page text.
 @MainActor
 final class WebTransport: NSObject, WKNavigationDelegate {
     static let shared = WebTransport()
 
-    private let webView: WKWebView
+    private var webView: WKWebView
     private var loadedOrigin: String?
     private var fullyPrimed: Set<String> = []
     private var waiters: [CheckedContinuation<Void, Error>] = []
     private var loading = false
+    private var lastResponse: HTTPURLResponse?
+    private var preferNavigation = false
 
     override init() {
+        webView = WebTransport.makeWebView()
+        super.init()
+        webView.navigationDelegate = self
+    }
+
+    private static func makeWebView() -> WKWebView {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
         cfg.mediaTypesRequiringUserActionForPlayback = .all
-        webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 2, height: 2), configuration: cfg)
-        super.init()
-        webView.navigationDelegate = self
-        webView.isUserInteractionEnabled = false
-        webView.alpha = 0.01
+        let v = WKWebView(frame: CGRect(x: 0, y: 0, width: 2, height: 2), configuration: cfg)
+        v.isUserInteractionEnabled = false
+        v.alpha = 0.01
+        v.customUserAgent = nil
+        return v
     }
 
     /// The real Safari user agent of this device, used for direct requests too.
@@ -34,10 +44,17 @@ final class WebTransport: NSObject, WKNavigationDelegate {
         return "Mozilla/5.0 (iPhone; CPU iPhone OS \(v.replacingOccurrences(of: ".", with: "_")) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
     }
 
-    /// Forget the loaded page so the next request re-opens Reddit (e.g. after verification).
+    /// Throw away the hidden browser and start a fresh one, so it picks up a new sign-in.
     func reset() {
+        finish(CancellationError())
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.removeFromSuperview()
+        webView = WebTransport.makeWebView()
+        webView.navigationDelegate = self
         loadedOrigin = nil
         fullyPrimed = []
+        preferNavigation = false
     }
 
     struct Response {
@@ -51,15 +68,25 @@ final class WebTransport: NSObject, WKNavigationDelegate {
     func fetch(_ url: URL) async throws -> Response {
         guard let scheme = url.scheme, let host = url.host else { throw RedditError.notFound }
         let origin = "\(scheme)://\(host)"
+        await syncCookiesToURLSession()
+
+        if preferNavigation { return try await navigate(url) }
+
         try await prime(origin, full: fullyPrimed.contains(origin))
         var r = try await run(url)
         if Self.looksBlocked(r), !fullyPrimed.contains(origin) {
-            // A lightweight page wasn't enough; open the real front page once so any check runs.
+            // Open the real front page once so the session is established, then retry.
             fullyPrimed.insert(origin)
             try await prime(origin, full: true)
             r = try await run(url)
         }
-        await syncCookiesToURLSession()
+        if Self.looksBlocked(r) {
+            await logCookies(for: url)
+            // fetch() was treated as signed out; load the JSON as a normal page instead.
+            let n = try await navigate(url)
+            if !Self.looksBlocked(n) { preferNavigation = true }
+            return n
+        }
         return r
     }
 
@@ -84,18 +111,36 @@ final class WebTransport: NSObject, WKNavigationDelegate {
         return Response(status: status, contentType: ct, data: Data(body.utf8), retryAfter: ra?.isEmpty == false ? ra : nil, finalURL: final)
     }
 
+    /// Load the JSON URL as a top-level page (like Safari's address bar) and read its text.
+    private func navigate(_ url: URL) async throws -> Response {
+        try await load(url)
+        let finalURL = webView.url
+        if let s = url.scheme, let h = finalURL?.host { loadedOrigin = "\(s)://\(h)" }
+        let text = try await webView.callAsyncJavaScript("return document.body ? document.body.innerText : ''", arguments: [:], in: nil, contentWorld: .defaultClient) as? String ?? ""
+        let resp = lastResponse
+        var ct = resp?.value(forHTTPHeaderField: "Content-Type") ?? resp?.mimeType ?? ""
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !ct.contains("json"), trimmed.hasPrefix("{") || trimmed.hasPrefix("[") { ct = "application/json" }
+        return Response(status: resp?.statusCode ?? 0, contentType: ct, data: Data(trimmed.utf8),
+                        retryAfter: resp?.value(forHTTPHeaderField: "Retry-After"), finalURL: finalURL)
+    }
+
     private func prime(_ origin: String, full: Bool) async throws {
         if loadedOrigin == origin && !full { return }
+        try await load(URL(string: full ? origin + "/" : origin + "/robots.txt")!)
+        loadedOrigin = origin
+    }
+
+    private func load(_ url: URL) async throws {
         attachIfNeeded()
-        let page = full ? origin + "/" : origin + "/robots.txt"
+        lastResponse = nil
         try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
             waiters.append(c)
             if !loading {
                 loading = true
-                webView.load(URLRequest(url: URL(string: page)!, timeoutInterval: 20))
+                webView.load(URLRequest(url: url, timeoutInterval: 20))
             }
         }
-        loadedOrigin = origin
     }
 
     /// WebKit throttles views that aren't in a window, so keep it (invisibly) in the key window.
@@ -121,8 +166,27 @@ final class WebTransport: NSObject, WKNavigationDelegate {
         for c in cookies where c.domain.contains("reddit.com") { HTTPCookieStorage.shared.setCookie(c) }
     }
 
+    /// Diagnostic: which Reddit cookies (names and domains only, never values) apply to this URL.
+    private func logCookies(for url: URL) async {
+        let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+        let host = url.host ?? ""
+        let applicable = cookies.filter { c in
+            let d = c.domain.hasPrefix(".") ? String(c.domain.dropFirst()) : c.domain
+            return host == d || host.hasSuffix("." + d)
+        }
+        let names = applicable.map { "\($0.name)@\($0.domain)" }.sorted().joined(separator: ", ")
+        NetworkStatus.shared.record(RequestLog(via: "cookies", url: url.host ?? "", status: applicable.count,
+                                               contentType: "cookies sent to this host",
+                                               location: nil, snippet: names.isEmpty ? "(none)" : names))
+    }
+
     // MARK: WKNavigationDelegate
 
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if navigationResponse.isForMainFrame { lastResponse = navigationResponse.response as? HTTPURLResponse }
+        decisionHandler(.allow)
+    }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finish(nil) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { finish(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
