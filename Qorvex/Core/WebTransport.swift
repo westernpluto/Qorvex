@@ -191,6 +191,15 @@ final class WebTransport: NSObject, WKNavigationDelegate {
 /// sees the password.
 @MainActor
 enum RedditAccount {
+    /// All current reddit.com cookies as one Cookie header value.
+    static func cookieHeader() async -> String {
+        let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+        return cookies
+            .filter { $0.domain.hasSuffix("reddit.com") && ($0.expiresDate ?? .distantFuture) > Date() }
+            .map { "\($0.name)=\($0.value)" }
+            .joined(separator: "; ")
+    }
+
     static func isSignedIn() async -> Bool {
         let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
         return cookies.contains { $0.name == "reddit_session" && $0.domain.contains("reddit.com") && ($0.expiresDate ?? .distantFuture) > Date() }
@@ -202,11 +211,24 @@ enum RedditAccount {
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: records.filter { $0.displayName.contains("reddit") })
         for c in HTTPCookieStorage.shared.cookies ?? [] where c.domain.contains("reddit.com") { HTTPCookieStorage.shared.deleteCookie(c) }
         WebTransport.shared.reset()
-        NetworkStatus.shared.signedIn = false
+        set(false, name: nil)
     }
 
+    /// Ask Reddit who we are (cookies alone are unreliable: signed-out sessions get them too).
     static func refresh() async {
-        NetworkStatus.shared.signedIn = await isSignedIn()
+        guard await isSignedIn() else { set(false, name: nil); return }
+        let result = await RedditClient.shared.whoAmI()
+        switch result {
+        case .signedIn(let name): set(true, name: name)
+        case .signedOut: set(false, name: nil)
+        case .unknown: set(true, name: NetworkStatus.shared.username) // network issue: trust the cookie for now
+        }
+    }
+
+    static func set(_ signedIn: Bool, name: String?) {
+        NetworkStatus.shared.signedIn = signedIn
+        NetworkStatus.shared.username = name
+        AppSettings.shared.webSessionSignedIn = signedIn
     }
 }
 
@@ -238,9 +260,12 @@ struct RedditVerifyView: View {
                 }
                 .task {
                     // Watch for the session cookie and finish automatically once signed in.
+                    // Cookies alone don't prove a login (signed-out sessions get them too), so confirm
+                    // with Reddit at most every 5 seconds once a session cookie exists.
                     while !Task.isCancelled && !finished {
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                        if await RedditAccount.isSignedIn() { await complete(); break }
+                        try? await Task.sleep(nanoseconds: 5_000_000_000)
+                        guard await RedditAccount.isSignedIn() else { continue }
+                        if case .signedIn = await RedditClient.shared.whoAmI() { await complete(); break }
                     }
                 }
         }

@@ -38,7 +38,7 @@ struct LibraryView: View {
                 Text("Combine communities into your own feeds.")
             }
 
-            if NetworkStatus.shared.signedIn || AppSettings.shared.apiActive {
+            if NetworkStatus.shared.signedIn || AppSettings.shared.fullAccess {
                 Section {
                     Button { Task { await importSubs() } } label: {
                         HStack {

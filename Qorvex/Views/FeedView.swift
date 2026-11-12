@@ -27,7 +27,7 @@ final class FeedModel {
 
     /// Communities to merge, or nil for a single-page feed.
     private var mergedSubs: [String]? {
-        if AppSettings.shared.apiActive { return nil } // the API serves r/a+b directly
+        if AppSettings.shared.fullAccess { return nil } // oauth.reddit.com serves r/a+b directly
         switch source {
         case .home:
             let s = Library.shared.subs
@@ -42,7 +42,7 @@ final class FeedModel {
 
     private var singlePath: String {
         switch source {
-        case .custom where AppSettings.shared.apiActive: return source.path
+        case .custom where AppSettings.shared.fullAccess: return source.path
         case .home, .custom: return "r/popular"
         default: return source.path
         }
@@ -60,7 +60,7 @@ final class FeedModel {
             cursor = 0; subAfter = [:]; exhausted = []
         }
         // Signed in: Home is the account's own front page (your Reddit subscriptions, Reddit's order).
-        if source == .home && (NetworkStatus.shared.signedIn || AppSettings.shared.apiActive) && !Self.frontPageBlocked {
+        if source == .home && (NetworkStatus.shared.signedIn || AppSettings.shared.fullAccess) && !Self.frontPageBlocked {
             if let e = await loadSingle(path: "", reset: reset, force: force, gen: gen) {
                 if case RedditError.blocked(_) = e { Self.frontPageBlocked = true }
                 else if case RedditError.loginRequired = e { Self.frontPageBlocked = true }
@@ -82,7 +82,7 @@ final class FeedModel {
     /// Set once Reddit refuses the signed-in front page, so we don't keep asking this session.
     static var frontPageBlocked = false
 
-    @MainActor var usingFrontPage: Bool { source == .home && (NetworkStatus.shared.signedIn || AppSettings.shared.apiActive) && !Self.frontPageBlocked }
+    @MainActor var usingFrontPage: Bool { source == .home && (NetworkStatus.shared.signedIn || AppSettings.shared.fullAccess) && !Self.frontPageBlocked }
 
     @MainActor @discardableResult
     private func loadSingle(path: String, reset: Bool, force: Bool, gen: Int) async -> Error? {

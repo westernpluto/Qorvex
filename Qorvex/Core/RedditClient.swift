@@ -56,6 +56,7 @@ final class NetworkStatus {
     var blocked = false
     var loginRequired = false
     var signedIn = false
+    var username: String?
     var usingBrowserEngine = false
     var backoffUntil: Date?
 
@@ -141,7 +142,7 @@ actor RedditClient {
                 continue
             }
             stamps.removeAll { now.timeIntervalSince($0) >= 60 }
-            let budget = max(1, await MainActor.run { AppSettings.shared.apiActive ? max(60, AppSettings.shared.requestsPerMinute) : AppSettings.shared.requestsPerMinute })
+            let budget = max(1, await MainActor.run { AppSettings.shared.apiActive ? max(60, AppSettings.shared.requestsPerMinute) : (AppSettings.shared.sessionRouteActive ? max(20, AppSettings.shared.requestsPerMinute) : AppSettings.shared.requestsPerMinute) })
             if stamps.count < budget {
                 stamps.append(now)
                 await MainActor.run {
@@ -214,9 +215,24 @@ actor RedditClient {
     // MARK: - Fetch
 
     private func download(_ path: String, host: String) async throws -> Data {
-        if await MainActor.run(body: { AppSettings.shared.apiActive }) {
+        let (useAPI, useSession) = await MainActor.run { (AppSettings.shared.apiActive, AppSettings.shared.sessionRouteActive) }
+        if useAPI {
             try await acquireSlot()
             return try await viaAPI(path)
+        }
+        if useSession {
+            try await acquireSlot()
+            do {
+                let data = try await viaSession(path)
+                await setState(blocked: false, login: false)
+                return data
+            } catch RedditError.loginRequired {
+                await setState(blocked: false, login: true)
+                throw RedditError.loginRequired
+            } catch RedditError.blocked(let code) {
+                // Fall through to the limited web route below for what it can still serve.
+                if !Self.webServes(path) { await setState(blocked: true, login: false); throw RedditError.blocked(code) }
+            }
         }
         let mode = await MainActor.run { AppSettings.shared.connection }
         let sep = path.contains("?") ? "&" : "?"
@@ -342,12 +358,100 @@ actor RedditClient {
         throw RedditError.blocked(310)
     }
 
+    // MARK: Key-free web session route (cookie auth on oauth.reddit.com)
+
+    private var sessionStreak = 0
+    private var sessionCooldownLevel = 0
+
+    /// oauth.reddit.com takes listings with `.json`, but `/api/*` endpoints without it.
+    static func oauthPath(_ path: String) -> String {
+        guard path.hasPrefix("/api/") else { return path }
+        return path.replacingOccurrences(of: ".json?", with: "?").replacingOccurrences(of: ".json", with: "")
+    }
+
+    /// What the plain web route still serves (front pages of single communities, r/popular,
+    /// post pages, profiles) — used as a fallback when the session route is blocked.
+    static func webServes(_ path: String) -> Bool {
+        let p = path.split(separator: "?").first.map(String.init) ?? path
+        if p.hasPrefix("/api/") || p.contains("/search") || p.contains("+") { return false }
+        for sort in ["/new.json", "/top.json", "/rising.json", "/controversial.json", "/hot.json", "/best.json"] where p.hasSuffix(sort) { return false }
+        return true
+    }
+
+    private func viaSession(_ path: String) async throws -> Data {
+        let cookie = await RedditAccount.cookieHeader()
+        guard cookie.contains("reddit_session=") else { throw RedditError.loginRequired }
+        if userAgent == nil { userAgent = await MainActor.run { WebTransport.safariUserAgent } }
+        let p = Self.oauthPath(path)
+        let sep = p.contains("?") ? "&" : "?"
+        guard let url = URL(string: "https://oauth.reddit.com" + p + sep + "raw_json=1") else { throw RedditError.notFound }
+        var req = URLRequest(url: url)
+        req.httpShouldHandleCookies = false
+        req.setValue(cookie, forHTTPHeaderField: "Cookie")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await session.data(for: req, delegate: redirectCatcher)
+        } catch let e as URLError where [URLError.Code.notConnectedToInternet, URLError.Code.networkConnectionLost, URLError.Code.dataNotAllowed].contains(e.code) {
+            throw RedditError.offline
+        }
+        guard let http = response as? HTTPURLResponse else { throw RedditError.http(0) }
+        let ct = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+        let location = http.value(forHTTPHeaderField: "Location")
+        await log("session", url, http.statusCode, ct, location, data)
+        if (300..<400).contains(http.statusCode) {
+            if let location, let next = URL(string: location, relativeTo: url)?.absoluteURL, Self.isLoginWall(next) { throw RedditError.loginRequired }
+            await sessionBlocked()
+            throw RedditError.blocked(http.statusCode)
+        }
+        do {
+            let d = try await interpret(status: http.statusCode, contentType: ct, retryAfter: http.value(forHTTPHeaderField: "Retry-After"), data: data)
+            sessionStreak = 0
+            sessionCooldownLevel = 0
+            return d
+        } catch RedditError.blocked(let c) {
+            await sessionBlocked()
+            throw RedditError.blocked(c)
+        }
+    }
+
+    /// Three block pages in a row pause the session route: 1h, doubling up to 8h.
+    private func sessionBlocked() async {
+        sessionStreak += 1
+        guard sessionStreak >= 3 else { return }
+        sessionStreak = 0
+        let hours = min(8.0, pow(2.0, Double(sessionCooldownLevel)))
+        sessionCooldownLevel += 1
+        let until = Date().addingTimeInterval(hours * 3600)
+        await MainActor.run { AppSettings.shared.sessionCooldownUntil = until }
+    }
+
+    enum WhoAmI { case signedIn(String), signedOut, unknown }
+
+    /// Verify the web session with /api/me (one request).
+    func whoAmI() async -> WhoAmI {
+        do {
+            try await acquireSlot()
+            let data = try await viaSession("/api/me.json")
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let d = (obj?["data"] as? [String: Any]) ?? obj
+            if let name = d?["name"] as? String, !name.isEmpty { return .signedIn(name) }
+            return .signedOut
+        } catch RedditError.loginRequired {
+            return .signedOut
+        } catch {
+            return .unknown
+        }
+    }
+
     /// Official API: https://oauth.reddit.com with the user's own OAuth token.
     private func viaAPI(_ path: String) async throws -> Data {
         let (clientID, ua) = await MainActor.run { (AppSettings.shared.apiClientID, AppSettings.shared.apiUserAgent) }
         var token = try await RedditAPIAuth.shared.accessToken(clientID: clientID, userAgent: ua)
         let sep = path.contains("?") ? "&" : "?"
-        guard let url = URL(string: "https://oauth.reddit.com" + path + sep + "raw_json=1") else { throw RedditError.notFound }
+        let p = Self.oauthPath(path)
+        guard let url = URL(string: "https://oauth.reddit.com" + p + (p.contains("?") ? "&" : "?") + "raw_json=1") else { throw RedditError.notFound }
+        _ = sep
         for attempt in 0..<2 {
             var req = URLRequest(url: url)
             req.setValue("bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -468,8 +572,9 @@ enum Reddit {
 
     /// Web mode: Reddit serves only a community's plain front page as JSON (`/r/pics/.json`);
     /// sorted pages are blocked, so only Hot is requested. API mode supports every sort.
-    static var sortsAvailable: Bool { AppSettings.shared.apiActive }
-    static var apiActive: Bool { AppSettings.shared.apiActive }
+    static var sortsAvailable: Bool { AppSettings.shared.fullAccess }
+    /// Full feature set (own API key or working web session); endpoints use oauth-style paths.
+    static var apiActive: Bool { AppSettings.shared.fullAccess }
 
     static func listing(_ path: String, sort: SortOrder, time: TimeRange, after: String?, force: Bool = false) async throws -> Fetched<ListingResponse> {
         let api = apiActive

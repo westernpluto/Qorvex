@@ -36,7 +36,13 @@ struct SettingsView: View {
 
             Section {
                 if NetworkStatus.shared.signedIn {
-                    Label("Signed in to Reddit", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                    Label(NetworkStatus.shared.username.map { "Signed in as u/\($0)" } ?? "Signed in to Reddit", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                    if settings.sessionRouteActive {
+                        Label("Key-free mode: full features", systemImage: "bolt.fill").font(.footnote).foregroundStyle(.secondary)
+                    } else if settings.sessionCooldownUntil > Date() {
+                        Label("Reddit blocked key-free mode — retrying \(settings.sessionCooldownUntil.formatted(date: .omitted, time: .shortened))", systemImage: "pause.circle")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
                     Button("Sign Out", role: .destructive) {
                         Task { await RedditAccount.signOut(); Presenter.shared.show("Signed out") }
                     }

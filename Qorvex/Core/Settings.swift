@@ -188,6 +188,17 @@ final class AppSettings {
     /// Official API mode is in use: selected and signed in.
     var apiActive: Bool { connection == .api && apiSignedIn }
 
+    /// Signed in on reddit.com (verified via /api/me). Mirrors NetworkStatus.signedIn for non-UI code.
+    var webSessionSignedIn = false
+    /// The web-session route (cookie auth on oauth.reddit.com) is paused until this time after repeated blocks.
+    var sessionCooldownUntil = Date.distantPast
+
+    /// Key-free web session route: your reddit.com login used against oauth.reddit.com.
+    var sessionRouteActive: Bool { connection != .api && connection != .direct && webSessionSignedIn && Date() >= sessionCooldownUntil }
+
+    /// Full Reddit features available (own API key, or a working web session).
+    var fullAccess: Bool { apiActive || sessionRouteActive }
+
     private init() {
         func e<T: RawRepresentable>(_ k: String, _ def: T) -> T where T.RawValue == String {
             UserDefaults.standard.string(forKey: k).flatMap(T.init(rawValue:)) ?? def
