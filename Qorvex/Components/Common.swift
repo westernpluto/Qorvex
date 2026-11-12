@@ -232,14 +232,13 @@ struct SubredditHeader: View {
                     .padding(.horizontal, 16).padding(.top, 10)
                     .onTapGesture { showAbout = true }
             }
-            Button { showAbout = true } label: {
-                Label("About this community", systemImage: "info.circle").font(.footnote.weight(.semibold))
+            Button { Presenter.shared.openExternal(URL(string: "https://www.reddit.com/r/\(name)/about/")!) } label: {
+                Label("About this community on reddit.com", systemImage: "safari").font(.footnote.weight(.semibold))
             }
             .buttonStyle(.plain)
             .foregroundStyle(Color.accentColor)
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
-        .task { if info == nil { info = try? await Reddit.about(name) } }
         .sheet(isPresented: $showAbout) {
             NavigationStack {
                 ScrollView {

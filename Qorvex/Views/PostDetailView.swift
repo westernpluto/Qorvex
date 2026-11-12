@@ -80,7 +80,7 @@ final class CommentsModel {
         loading = true
         error = nil
         do {
-            let r = try await Reddit.comments(postID: postID, commentID: commentID, sort: sort, force: force)
+            let r = try await Reddit.comments(postID: postID, permalink: post?.permalink, commentID: commentID, sort: sort, force: force)
             let collapseAuto = AppSettings.shared.collapseAutomod
             let built: ([CommentNode], Set<String>, Post?) = await Task.detached(priority: .userInitiated) {
                 var out: [CommentNode] = []
@@ -304,11 +304,20 @@ struct PostDetailView: View {
                     }
                 }
         case .more(let m):
-            Button { Task { await model.loadMore(node) } } label: {
+            // Reddit blocks the "load more" endpoint for apps, so open the parent's thread instead
+            // (or the post on reddit.com for top-level overflow).
+            Button {
+                if let parent = m.parent_id, parent.hasPrefix("t1_") {
+                    router.push(.post(PostRef(id: ref.id, commentID: String(parent.dropFirst(3)), preview: model.post)))
+                } else if let p = model.post {
+                    Presenter.shared.openExternal(p.webURL)
+                }
+            } label: {
                 HStack(spacing: 8) {
-                    if model.loadingMore.contains(node.id) { ProgressView().controlSize(.small) }
-                    else { Image(systemName: "arrow.turn.down.right") }
-                    Text("\(m.count ?? m.children.count) more \((m.count ?? 0) == 1 ? "reply" : "replies")")
+                    Image(systemName: (m.parent_id ?? "").hasPrefix("t1_") ? "arrow.turn.down.right" : "safari")
+                    Text((m.parent_id ?? "").hasPrefix("t1_")
+                         ? "\(m.count ?? m.children.count) more \((m.count ?? 0) == 1 ? "reply" : "replies") — open thread"
+                         : "\(m.count ?? m.children.count) more comments on reddit.com")
                 }
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Color.accentColor)

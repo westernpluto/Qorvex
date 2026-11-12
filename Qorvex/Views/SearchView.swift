@@ -22,36 +22,18 @@ final class SearchModel {
     var searched = false
     @ObservationIgnored var generation = 0
 
+    /// Reddit blocks its search endpoints for apps, so search runs no network request: it shows
+    /// what's possible locally (jump to a community or person) and explains why.
     @MainActor
     func run(_ q: String, sub: String?, more: Bool = false) async {
         let q = q.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
-        if more && (after == nil || loading) { return }
-        generation += 1
-        let gen = generation
-        if !more { query = q; posts = []; subs = []; users = []; after = nil; Library.shared.addRecent(q) }
-        loading = true; error = nil; searched = true
-        do {
-            let r: Fetched<ListingResponse>
-            switch scope {
-            case .posts: r = try await Reddit.searchPosts(q, sub: sub, sort: sort, time: time, after: more ? after : nil)
-            case .communities: r = try await Reddit.searchSubreddits(q, after: more ? after : nil)
-            case .people: r = try await Reddit.searchUsers(q, after: more ? after : nil)
-            }
-            guard gen == generation else { return }
-            for t in r.value.data.children {
-                switch t {
-                case .post(let p): if Library.shared.shouldShow(p), !posts.contains(p) { posts.append(p) }
-                case .subreddit(let s): subs.append(s)
-                case .user(let u): users.append(u)
-                default: break
-                }
-            }
-            after = r.value.data.after
-        } catch {
-            if gen == generation { self.error = error.localizedDescription }
-        }
-        if gen == generation { loading = false }
+        guard !q.isEmpty, !more else { return }
+        query = q
+        posts = []; subs = []; users = []; after = nil
+        Library.shared.addRecent(q)
+        searched = true
+        loading = false
+        error = "Reddit blocks search for apps right now. Use “Go to r/…” or “Go to u/…” above, or browse Discover."
     }
 }
 
@@ -76,6 +58,7 @@ struct SearchView: View {
             } else if !model.searched {
                 Section { suggestions }
             } else {
+                Section { suggestions }
                 results
             }
         }
@@ -185,7 +168,7 @@ struct SearchView: View {
             if model.loading {
                 ProgressView().frame(maxWidth: .infinity).padding().listRowBackground(Color.clear)
             } else if let e = model.error {
-                ErrorState(message: e) { Task { await model.run(text, sub: sub) } }.listRowBackground(Color.clear)
+                HintCard(icon: "info.circle", text: e).listRowBackground(Color.clear)
             } else if model.posts.isEmpty && model.subs.isEmpty && model.users.isEmpty {
                 EmptyState(icon: "magnifyingglass", title: "No results", message: "Nothing matched “\(model.query)”.").listRowBackground(Color.clear)
             }

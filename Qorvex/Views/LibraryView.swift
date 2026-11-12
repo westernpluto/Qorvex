@@ -208,35 +208,38 @@ struct HistoryView: View {
 }
 
 struct DiscoverView: View {
-    @State private var subs: [Subreddit] = []
-    @State private var after: String?
-    @State private var loading = false
-    @State private var error: String?
+    /// Built in, so browsing costs no requests (Reddit blocks its community directory for apps).
+    static let categories: [(String, String, [String])] = [
+        ("Popular", "flame.fill", ["pics", "funny", "AskReddit", "gaming", "worldnews", "todayilearned", "movies", "aww", "Music", "memes"]),
+        ("News & Science", "newspaper.fill", ["news", "worldnews", "science", "space", "technology", "Futurology", "dataisbeautiful", "explainlikeimfive"]),
+        ("Tech", "cpu.fill", ["apple", "iphone", "ios", "programming", "swift", "gadgets", "hardware", "MachineLearning"]),
+        ("Beautiful", "photo.fill", ["EarthPorn", "itookapicture", "CityPorn", "SpacePorn", "AbandonedPorn", "MostBeautiful"]),
+        ("Interesting", "sparkles", ["interestingasfuck", "Damnthatsinteresting", "nextfuckinglevel", "BeAmazed", "mildlyinteresting", "oddlysatisfying"]),
+        ("Entertainment", "tv.fill", ["television", "books", "Games", "NintendoSwitch", "PS5", "anime", "comics"]),
+        ("Lifestyle", "leaf.fill", ["food", "Cooking", "fitness", "travel", "DIY", "GetMotivated", "LifeProTips", "personalfinance"]),
+        ("Sports", "sportscourt.fill", ["sports", "nba", "nfl", "soccer", "formula1", "baseball"]),
+    ]
 
     var body: some View {
         List {
-            ForEach(subs, id: \.display_name) { s in
-                NavigationLink(value: Route.feed(.subreddit(s.display_name))) { SubredditRow(sub: s) }
-                    .onAppear { if s.display_name == subs.last?.display_name { Task { await load() } } }
+            ForEach(Self.categories, id: \.0) { cat in
+                Section {
+                    ForEach(cat.2, id: \.self) { name in
+                        NavigationLink(value: Route.feed(.subreddit(name))) {
+                            HStack(spacing: 12) {
+                                Avatar(name: name, size: 34)
+                                Text("r/\(name)").font(.subheadline.weight(.semibold))
+                                Spacer()
+                                JoinButton(name: name)
+                            }
+                        }
+                    }
+                } header: {
+                    Label(cat.0, systemImage: cat.1)
+                }
             }
-            if loading { ProgressView().frame(maxWidth: .infinity).padding() }
-            if let error { ErrorState(message: error) { Task { await load() } } }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .navigationTitle("Discover")
-        .task { if subs.isEmpty { await load() } }
-    }
-
-    @MainActor private func load() async {
-        guard !loading, subs.isEmpty || after != nil else { return }
-        loading = true; error = nil
-        do {
-            let r = try await Reddit.popularSubreddits(after: after)
-            for t in r.value.data.children {
-                if case .subreddit(let s) = t, AppSettings.shared.nsfw != .hide || s.over18 != true { subs.append(s) }
-            }
-            after = r.value.data.after
-        } catch { self.error = error.localizedDescription }
-        loading = false
     }
 }

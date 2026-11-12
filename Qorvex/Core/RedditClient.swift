@@ -432,16 +432,33 @@ enum Reddit {
         return c.percentEncodedQuery.map { "?" + $0.replacingOccurrences(of: "+", with: "%2B") } ?? ""
     }
 
+    /// Reddit currently serves only a community's plain front page as JSON (`/r/pics/.json`);
+    /// sorted pages (`/r/pics/new/.json`) are blocked, so only Hot is requested.
+    static let sortsAvailable = false
+
     static func listing(_ path: String, sort: SortOrder, time: TimeRange, after: String?, force: Bool = false) async throws -> Fetched<ListingResponse> {
-        let t: String? = sort.needsTime ? time.rawValue : nil
-        // Hot is the community's front page itself: /r/pics/.json (other sorts: /r/pics/new/.json).
-        let page = sort == .hot ? "/\(path)" : "/\(path)/\(sort.rawValue)"
-        return try await RedditClient.shared.get(page + ".json" + q(["limit": "25", "t": t, "after": after]), as: ListingResponse.self, force: force)
+        let page: String
+        if sort == .hot || !sortsAvailable {
+            page = "/\(path)"
+        } else {
+            page = "/\(path)/\(sort.rawValue)"
+        }
+        let t: String? = sortsAvailable && sort.needsTime ? time.rawValue : nil
+        return try await RedditClient.shared.get(page + ".json" + q(["t": t, "after": after]), as: ListingResponse.self, force: force)
     }
 
-    static func comments(postID: String, commentID: String?, sort: CommentSort, force: Bool = false) async throws -> Fetched<[ListingResponse]> {
-        let path = "/comments/\(postID)" + (commentID.map { "/_/\($0)" } ?? "") + ".json"
-        return try await RedditClient.shared.get(path + q(["sort": sort.rawValue, "limit": "200", "context": commentID == nil ? nil : "3"]), as: [ListingResponse].self, kind: .post, force: force)
+    /// A post's own page + `.json` (e.g. `/r/pics/comments/abc/title/.json`), as Safari would load it.
+    static func comments(postID: String, permalink: String?, commentID: String?, sort: CommentSort, force: Bool = false) async throws -> Fetched<[ListingResponse]> {
+        var base: String
+        if var p = permalink, p.hasPrefix("/") {
+            if !p.hasSuffix("/") { p += "/" }
+            base = p
+        } else {
+            base = "/comments/\(postID)/"
+        }
+        if let commentID { base += (permalink == nil ? "_/" : "") + "\(commentID)/" }
+        let path = base + ".json" + q(["sort": sort == .confidence ? nil : sort.rawValue, "context": commentID == nil ? nil : "3"])
+        return try await RedditClient.shared.get(path, as: [ListingResponse].self, kind: .post, force: force)
     }
 
     static func moreChildren(postID: String, ids: [String], sort: CommentSort) async throws -> [Thing] {
@@ -476,7 +493,7 @@ enum Reddit {
         try await RedditClient.shared.get("/user/\(name)/about.json", as: Wrapped<RedditUser>.self, kind: .about).value.data
     }
 
-    static func userListing(_ name: String, tab: String, sort: SortOrder, time: TimeRange, after: String?, force: Bool = false) async throws -> Fetched<ListingResponse> {
-        try await RedditClient.shared.get("/user/\(name)/\(tab).json" + q(["sort": sort.rawValue, "t": sort.needsTime ? time.rawValue : nil, "after": after, "limit": "25"]), as: ListingResponse.self, force: force)
+    static func userListing(_ name: String, after: String?, force: Bool = false) async throws -> Fetched<ListingResponse> {
+        try await RedditClient.shared.get("/user/\(name).json" + q(["after": after]), as: ListingResponse.self, force: force)
     }
 }

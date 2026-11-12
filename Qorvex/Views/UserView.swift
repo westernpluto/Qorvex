@@ -26,13 +26,6 @@ struct UserView: View {
     var body: some View {
         List {
             header.plainRow()
-            Picker("", selection: $tab) {
-                Text("Overview").tag("overview")
-                Text("Posts").tag("submitted")
-                Text("Comments").tag("comments")
-            }
-            .pickerStyle(.segmented)
-            .plainRow()
 
             ForEach(items) { item in
                 Group {
@@ -64,9 +57,6 @@ struct UserView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Picker("Sort", selection: $sort) {
-                        ForEach([SortOrder.new, .hot, .top, .controversial]) { Label($0.label, systemImage: $0.icon).tag($0) }
-                    }
                     ShareLink(item: URL(string: "https://www.reddit.com/user/\(name)")!) { Label("Share Profile", systemImage: "square.and.arrow.up") }
                     Button(role: .destructive) { library.filters.users.append(name); Presenter.shared.show("u/\(name) filtered") } label: {
                         Label("Filter This User", systemImage: "nosign")
@@ -76,11 +66,8 @@ struct UserView: View {
         }
         .refreshable { await load(reset: true, force: true) }
         .task {
-            if user == nil { user = try? await Reddit.user(name) }
             if items.isEmpty { await load(reset: true) }
         }
-        .onChange(of: tab) { _, _ in Task { await load(reset: true) } }
-        .onChange(of: sort) { _, _ in Task { await load(reset: true) } }
         .handlesLinks(router)
     }
 
@@ -116,7 +103,7 @@ struct UserView: View {
         if !reset && after == nil && !items.isEmpty { return }
         loading = true; error = nil
         do {
-            let r = try await Reddit.userListing(name, tab: tab, sort: sort, time: .all, after: reset ? nil : after, force: force)
+            let r = try await Reddit.userListing(name, after: reset ? nil : after, force: force)
             if reset { items = [] }
             for t in r.value.data.children {
                 switch t {

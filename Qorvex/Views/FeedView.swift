@@ -10,14 +10,40 @@ final class FeedModel {
     var error: String?
     var staleNote: String?
     var done = false
-    var sort: SortOrder
+    var sort: SortOrder = .hot
     var time: TimeRange = .day
     @ObservationIgnored private var seen = Set<String>()
     @ObservationIgnored private var generation = 0
+    // Multi-community feeds (Home, custom feeds): Reddit won't serve r/a+b, so load a few
+    // communities' front pages at a time and merge them.
+    @ObservationIgnored private var cursor = 0
+    @ObservationIgnored private var subAfter: [String: String] = [:]
+    @ObservationIgnored private var exhausted = Set<String>()
+    static let batchSize = 3
 
     init(source: FeedSource) {
         self.source = source
-        sort = source == .home ? AppSettings.shared.homeSort : .hot
+    }
+
+    /// Communities to merge, or nil for a single-page feed.
+    private var mergedSubs: [String]? {
+        switch source {
+        case .home:
+            let s = Library.shared.subs
+            return s.isEmpty ? nil : s
+        case .custom(let id):
+            let s = Library.shared.feeds.first { $0.id == id }?.subs ?? []
+            return s.isEmpty ? nil : s
+        default:
+            return nil
+        }
+    }
+
+    private var singlePath: String {
+        switch source {
+        case .home, .custom: return "r/popular"
+        default: return source.path
+        }
     }
 
     @MainActor
@@ -27,29 +53,99 @@ final class FeedModel {
         generation += 1
         let gen = generation
         loading = true
-        if reset { error = nil; staleNote = nil }
+        if reset {
+            error = nil; staleNote = nil
+            cursor = 0; subAfter = [:]; exhausted = []
+        }
+        if let subs = mergedSubs {
+            await loadMerged(subs, reset: reset, force: force, gen: gen)
+        } else {
+            await loadSingle(reset: reset, force: force, gen: gen)
+        }
+    }
+
+    @MainActor
+    private func loadSingle(reset: Bool, force: Bool, gen: Int) async {
         do {
-            let r = try await Reddit.listing(source.path, sort: sort, time: time, after: reset ? nil : after, force: force)
+            let r = try await Reddit.listing(singlePath, sort: sort, time: time, after: reset ? nil : after, force: force)
             guard gen == generation else { return }
             if reset { posts = []; seen = []; done = false }
-            var new: [Post] = []
-            for t in r.value.data.children {
-                guard case .post(let p) = t, !seen.contains(p.id) else { continue }
-                seen.insert(p.id)
-                if Library.shared.shouldShow(p) { new.append(p) }
-            }
+            let new = accept(r.value.data.children)
             posts.append(contentsOf: new)
             after = r.value.data.after
             done = after == nil
             staleNote = r.stale ? "\(r.error?.localizedDescription ?? "Offline") · showing cached from \(Int(r.age / 60)) min ago" : nil
             loading = false
-            // Heavily filtered pages: keep going so the list never looks empty.
             if new.count < 5 && !done { await load() }
         } catch {
             guard gen == generation else { return }
             self.error = error.localizedDescription
             loading = false
         }
+    }
+
+    @MainActor
+    private func loadMerged(_ subs: [String], reset: Bool, force: Bool, gen: Int) async {
+        // Pick the next few communities that still have pages, round-robin.
+        var batch: [String] = []
+        var scanned = 0
+        while batch.count < Self.batchSize && scanned < subs.count {
+            let s = subs[cursor % subs.count]
+            cursor += 1
+            scanned += 1
+            if !exhausted.contains(s) && !batch.contains(s) { batch.append(s) }
+        }
+        if batch.isEmpty {
+            if reset { posts = []; seen = [] }
+            done = true; loading = false
+            return
+        }
+        var collected: [Post] = []
+        var firstError: Error?
+        var anyStale = false
+        for sub in batch {
+            do {
+                let r = try await Reddit.listing("r/\(sub)", sort: .hot, time: time, after: subAfter[sub], force: force)
+                guard gen == generation else { return }
+                if r.stale { anyStale = true }
+                for t in r.value.data.children { if case .post(let p) = t { collected.append(p) } }
+                if let a = r.value.data.after { subAfter[sub] = a } else { exhausted.insert(sub) }
+            } catch {
+                guard gen == generation else { return }
+                if firstError == nil { firstError = error }
+                // Stop early on blocks/login walls so we don't keep knocking.
+                if case RedditError.blocked(_) = error { break }
+                if case RedditError.loginRequired = error { break }
+                if case RedditError.rateLimited = error { break }
+                exhausted.insert(sub)
+            }
+        }
+        if reset { posts = []; seen = []; done = false }
+        // Merge the batch by a simple "hot" score so communities interleave naturally.
+        let now = Date().timeIntervalSince1970
+        collected.sort { a, b in
+            func hot(_ p: Post) -> Double {
+                let ageHours = max(0, (now - p.created_utc) / 3600)
+                return Double(max(p.score ?? 0, 0) + 1) / pow(ageHours + 2, 1.5)
+            }
+            return hot(a) > hot(b)
+        }
+        let new = accept(collected.map { Thing.post($0) })
+        posts.append(contentsOf: new)
+        done = exhausted.count >= Set(subs).count
+        staleNote = anyStale ? "Some communities are showing cached posts" : nil
+        if new.isEmpty, let e = firstError, posts.isEmpty { self.error = e.localizedDescription }
+        loading = false
+    }
+
+    private func accept(_ things: [Thing]) -> [Post] {
+        var new: [Post] = []
+        for t in things {
+            guard case .post(let p) = t, !seen.contains(p.id) else { continue }
+            seen.insert(p.id)
+            if Library.shared.shouldShow(p) { new.append(p) }
+        }
+        return new
     }
 
     func remove(_ id: String) { posts.removeAll { $0.id == id } }
@@ -126,25 +222,10 @@ struct FeedView: View {
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
             Menu {
-                ForEach(SortOrder.allCases) { s in
-                    if s.needsTime {
-                        Menu {
-                            ForEach(TimeRange.allCases) { t in
-                                Button {
-                                    model.sort = s; model.time = t
-                                    Task { await model.load(reset: true) }
-                                } label: {
-                                    if model.sort == s && model.time == t { Label(t.label, systemImage: "checkmark") } else { Text(t.label) }
-                                }
-                            }
-                        } label: { Label(model.sort == s ? "\(s.label) · \(model.time.label)" : s.label, systemImage: s.icon) }
-                    } else {
-                        Button {
-                            model.sort = s
-                            Task { await model.load(reset: true) }
-                        } label: {
-                            Label(s.label, systemImage: model.sort == s ? "checkmark" : s.icon)
-                        }
+                Button { } label: { Label("Hot", systemImage: "checkmark") }
+                Section("Reddit blocks other sorts for apps right now") {
+                    ForEach(SortOrder.allCases.filter { $0 != .hot }) { s in
+                        Button { } label: { Label(s.label, systemImage: s.icon) }.disabled(true)
                     }
                 }
             } label: {
