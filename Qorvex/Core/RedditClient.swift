@@ -410,7 +410,8 @@ actor RedditClient {
             sessionCooldownLevel = 0
             return d
         } catch RedditError.blocked(let c) {
-            await sessionBlocked()
+            // A 404 "page not found" means this route doesn't serve that path — not a block.
+            if c == 403 { await sessionBlocked() }
             throw RedditError.blocked(c)
         }
     }
@@ -428,16 +429,29 @@ actor RedditClient {
 
     enum WhoAmI { case signedIn(String), signedOut, unknown }
 
-    /// Verify the web session with /api/me (one request).
+    /// Verify the web session with www.reddit.com/api/me.json (the endpoint the website itself uses).
+    /// Never counts toward the session-route cooldown.
     func whoAmI() async -> WhoAmI {
+        let cookie = await RedditAccount.cookieHeader()
+        guard cookie.contains("reddit_session=") else { return .signedOut }
+        if userAgent == nil { userAgent = await MainActor.run { WebTransport.safariUserAgent } }
+        guard let url = URL(string: "https://www.reddit.com/api/me.json?raw_json=1") else { return .unknown }
         do {
             try await acquireSlot()
-            let data = try await viaSession("/api/me.json")
+            var req = URLRequest(url: url)
+            req.httpShouldHandleCookies = false
+            req.setValue(cookie, forHTTPHeaderField: "Cookie")
+            req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await session.data(for: req, delegate: redirectCatcher)
+            guard let http = response as? HTTPURLResponse else { return .unknown }
+            let ct = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            await log("me", url, http.statusCode, ct, http.value(forHTTPHeaderField: "Location"), data)
+            guard http.statusCode == 200, ct.contains("json") else {
+                return (300..<400).contains(http.statusCode) ? .signedOut : .unknown
+            }
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             let d = (obj?["data"] as? [String: Any]) ?? obj
             if let name = d?["name"] as? String, !name.isEmpty { return .signedIn(name) }
-            return .signedOut
-        } catch RedditError.loginRequired {
             return .signedOut
         } catch {
             return .unknown
@@ -567,7 +581,8 @@ enum Reddit {
             guard let v, !v.isEmpty else { return nil }
             return URLQueryItem(name: k, value: v)
         }.sorted { $0.name < $1.name }
-        return c.percentEncodedQuery.map { "?" + $0.replacingOccurrences(of: "+", with: "%2B") } ?? ""
+        guard let query = c.percentEncodedQuery, !query.isEmpty else { return "" }
+        return "?" + query.replacingOccurrences(of: "+", with: "%2B")
     }
 
     /// Web mode: Reddit serves only a community's plain front page as JSON (`/r/pics/.json`);
