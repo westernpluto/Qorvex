@@ -214,7 +214,7 @@ actor RedditClient {
     private func download(_ path: String, host: String) async throws -> Data {
         let mode = await MainActor.run { AppSettings.shared.connection }
         let sep = path.contains("?") ? "&" : "?"
-        guard let url = URL(string: host + path + sep + "raw_json=1") else { throw RedditError.notFound }
+        guard let url = URL(string: host + Self.pageStyle(path) + sep + "raw_json=1") else { throw RedditError.notFound }
         let signedIn = await MainActor.run { NetworkStatus.shared.signedIn }
         // Signed in: go straight to the browser engine, which carries the session like Safari.
         let browserFirst = mode == .browser || (mode == .automatic && (preferBrowser || signedIn))
@@ -259,6 +259,18 @@ actor RedditClient {
             await setState(blocked: true, login: false)
             throw RedditError.blocked(code)
         }
+    }
+
+    /// Reddit serves `.json` appended to a page URL (`/r/pics/.json`, `/r/pics/new/.json`), the way
+    /// you'd add it in Safari, but blocks the bare `/r/pics/hot.json` form. Rewrite every path to
+    /// the page style: `/a/b.json?x` → `/a/b/.json?x`.
+    static func pageStyle(_ path: String) -> String {
+        let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        var p = String(parts[0])
+        if p.hasSuffix(".json") && !p.hasSuffix("/.json") {
+            p = String(p.dropLast(5)) + "/.json"
+        }
+        return parts.count > 1 ? p + "?" + parts[1] : p
     }
 
     private func setState(blocked: Bool, login: Bool) async {
@@ -422,7 +434,9 @@ enum Reddit {
 
     static func listing(_ path: String, sort: SortOrder, time: TimeRange, after: String?, force: Bool = false) async throws -> Fetched<ListingResponse> {
         let t: String? = sort.needsTime ? time.rawValue : nil
-        return try await RedditClient.shared.get("/\(path)/\(sort.rawValue).json" + q(["limit": "25", "t": t, "after": after]), as: ListingResponse.self, force: force)
+        // Hot is the community's front page itself: /r/pics/.json (other sorts: /r/pics/new/.json).
+        let page = sort == .hot ? "/\(path)" : "/\(path)/\(sort.rawValue)"
+        return try await RedditClient.shared.get(page + ".json" + q(["limit": "25", "t": t, "after": after]), as: ListingResponse.self, force: force)
     }
 
     static func comments(postID: String, commentID: String?, sort: CommentSort, force: Bool = false) async throws -> Fetched<[ListingResponse]> {
