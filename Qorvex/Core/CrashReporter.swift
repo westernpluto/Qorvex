@@ -39,7 +39,6 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
         for p in payloads {
             for c in p.crashDiagnostics ?? [] {
                 var parts: [String] = []
-                parts.append("v\(c.metaData.applicationVersion)")
                 if let t = c.exceptionType { parts.append("exception \(t)") }
                 if let sig = c.signal { parts.append("signal \(sig)") }
                 if let r = c.terminationReason, !r.isEmpty { parts.append(r) }
