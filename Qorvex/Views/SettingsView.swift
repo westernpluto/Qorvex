@@ -12,84 +12,10 @@ struct BackupDocument: FileDocument {
 struct SettingsView: View {
     @Bindable private var settings = AppSettings.shared
     private var library: Library { .shared }
-    @State private var exporting = false
-    @State private var importing = false
-    @State private var confirmReset = false
-    @State private var cacheInfo = "…"
 
     var body: some View {
         Form {
-            Section {
-                HStack(spacing: 14) {
-                    Image(systemName: "bolt.shield.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(.white)
-                        .frame(width: 52, height: 52)
-                        .background(settings.accent.color.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Qorvex").font(.headline)
-                        Text("Free, private, no account. Paced to never hit Reddit's limit.").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            Section {
-                if NetworkStatus.shared.signedIn {
-                    Label(NetworkStatus.shared.username.map { "Signed in as u/\($0)" } ?? "Signed in to Reddit", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
-                    if settings.sessionRouteActive {
-                        Label("Key-free mode: full features", systemImage: "bolt.fill").font(.footnote).foregroundStyle(.secondary)
-                    } else if settings.sessionCooldownUntil > Date() {
-                        Label("Reddit blocked key-free mode — retrying \(settings.sessionCooldownUntil.formatted(date: .omitted, time: .shortened))", systemImage: "pause.circle")
-                            .font(.footnote).foregroundStyle(.orange)
-                        Button("Retry Key-Free Mode Now") { settings.sessionCooldownUntil = .distantPast }
-                    }
-                    Button("Sign Out", role: .destructive) {
-                        Task { await RedditAccount.signOut(); Presenter.shared.show("Signed out") }
-                    }
-                } else {
-                    Button { Presenter.shared.verify = true } label: { Label("Sign in to Reddit", systemImage: "person.crop.circle") }
-                }
-            } header: { Text("Reddit Account") } footer: {
-                Text("Reddit only serves feeds to signed-in accounts. You sign in on reddit.com itself, so Qorvex never sees your password. Joined communities, saved posts and history in Qorvex stay on this device.")
-            }
-
-            Section {
-                TextField("Client ID", text: $settings.apiClientID)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .font(.body.monospaced())
-                TextField("Redirect URI", text: $settings.apiRedirectURI)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .font(.body.monospaced())
-                TextField("User Agent", text: $settings.apiUserAgent, axis: .vertical)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .font(.footnote.monospaced())
-                if settings.apiSignedIn {
-                    Label("Signed in with your API key", systemImage: "key.fill").foregroundStyle(.green)
-                    if settings.connection != .api {
-                        Button("Use Reddit API Mode") { settings.connection = .api }
-                    }
-                    Button("Sign Out of API", role: .destructive) {
-                        Task { await RedditAPISignIn.shared.signOut(); Presenter.shared.show("Signed out of the API") }
-                    }
-                } else {
-                    Button {
-                        Task {
-                            do {
-                                try await RedditAPISignIn.shared.signIn()
-                                settings.connection = .api
-                                Haptics.success()
-                                Presenter.shared.show("Connected to the Reddit API")
-                            } catch {
-                                Presenter.shared.show(error.localizedDescription)
-                            }
-                        }
-                    } label: { Label("Sign In with Reddit API", systemImage: "key") }
-                    .disabled(settings.apiClientID.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            } header: { Text("Reddit API (Your Own Key)") } footer: {
-                Text("Optional, like Apollo Reborn: use your own Reddit API app for every feature (all sorts, search, multi-community Home, load more replies) at up to 60 requests/min. Find your app at reddit.com/prefs/apps: it must be an “installed app”, and its redirect URI must exactly match the one above. Use your own app and a User Agent naming your own username — borrowing another app's credentials breaks Reddit's terms and gets keys revoked. Reddit currently restricts creating new keys.")
-            }
+            Section { AccountCard() }
 
             Section("Appearance") {
                 Picker("Theme", selection: $settings.theme) { ForEach(AppTheme.allCases) { Text($0.label).tag($0) } }
@@ -99,7 +25,7 @@ struct SettingsView: View {
                         ForEach(AccentChoice.allCases) { a in
                             Circle()
                                 .fill(a.color.gradient)
-                                .frame(width: 30, height: 30)
+                                .frame(width: 28, height: 28)
                                 .overlay(Circle().stroke(Color.primary, lineWidth: settings.accent == a ? 2.5 : 0).padding(-4))
                                 .frame(maxWidth: .infinity)
                                 .onTapGesture { withAnimation(.snappy) { settings.accent = a }; Haptics.tap() }
@@ -108,50 +34,88 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, 4)
                 Picker("Text Size", selection: $settings.textSize) { ForEach(TextSize.allCases) { Text($0.label).tag($0) } }
-                Picker("Post Layout", selection: $settings.layout) { ForEach(PostLayout.allCases) { Text($0.label).tag($0) } }
+                Picker("Layout", selection: $settings.layout) { ForEach(PostLayout.allCases) { Text($0.label).tag($0) } }
                     .pickerStyle(.segmented)
-                Toggle("Thumbnails in Compact", isOn: $settings.showThumbnails)
-                Toggle("Show Flair", isOn: $settings.showFlair)
-                Toggle(isOn: $settings.twoPane) {
-                    VStack(alignment: .leading) {
-                        Text("Two-Pane on Wide Screens")
-                        Text("Feed and post side by side when unfolded, in landscape or on iPad").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+                Toggle("Two Panes When Unfolded", isOn: $settings.twoPane)
             }
 
-            Section("Browsing") {
-                Picker("Default Home Sort", selection: $settings.homeSort) { ForEach(SortOrder.allCases) { Text($0.label).tag($0) } }
-                Picker("Default Comment Sort", selection: $settings.commentSort) { ForEach(CommentSort.allCases) { Text($0.label).tag($0) } }
+            Section("Reading") {
+                Picker("Comment Sort", selection: $settings.commentSort) { ForEach(CommentSort.allCases) { Text($0.label).tag($0) } }
                 Toggle("Dim Read Posts", isOn: $settings.dimRead)
-                Toggle("Hide Read Posts", isOn: $settings.hideRead)
                 Toggle("Swipe Actions", isOn: $settings.swipeActions)
                 Toggle("Next-Comment Button", isOn: $settings.nextCommentButton)
-                Toggle("Collapse AutoModerator", isOn: $settings.collapseAutomod)
-                Toggle("Haptics", isOn: $settings.haptics)
-            }
-
-            Section("Links") {
                 Toggle("Open Links In-App", isOn: $settings.inAppBrowser)
-                Toggle("Use Reader Mode", isOn: $settings.readerMode).disabled(!settings.inAppBrowser)
             }
 
-            Section {
+            Section("Media") {
                 Picker("Autoplay", selection: $settings.autoplay) { ForEach(AutoplayMode.allCases) { Text($0.label).tag($0) } }
                 Toggle("Start Videos Muted", isOn: $settings.startMuted)
-                Toggle("Data Saver", isOn: $settings.dataSaver)
-            } header: { Text("Media") } footer: { Text("Data Saver loads smaller images and lower-bitrate video.") }
-
-            Section("Content") {
                 Picker("NSFW", selection: $settings.nsfw) { ForEach(NSFWMode.allCases) { Text($0.label).tag($0) } }
                 Toggle("Blur Spoilers", isOn: $settings.blurSpoilers)
             }
 
             Section {
+                NavigationLink { FiltersSettingsView() } label: {
+                    LabeledContent("Filters", value: "\(library.filters.keywords.count + library.filters.subreddits.count + library.filters.users.count + library.filters.domains.count)")
+                }
+                NavigationLink("Your Data") { DataSettingsView() }
+                NavigationLink("Advanced") { AdvancedSettingsView() }
+            }
+
+            Section {
+                LabeledContent("Version", value: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
+            } footer: {
+                Text("Qorvex is an independent app and is not affiliated with Reddit.")
+            }
+        }
+        .navigationTitle("Settings")
+        .task { await RedditAccount.refresh() }
+    }
+}
+
+/// Signed-in account at the top of Settings.
+struct AccountCard: View {
+    var body: some View {
+        let net = NetworkStatus.shared
+        if net.signedIn {
+            HStack(spacing: 14) {
+                Avatar(name: net.username ?? "R", size: 46)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(net.username.map { "u/\($0)" } ?? "Signed in").font(.headline)
+                    Text("Reddit account").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Sign Out", role: .destructive) {
+                    Task { await RedditAccount.signOut(); Presenter.shared.show("Signed out") }
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline.weight(.semibold))
+            }
+            .padding(.vertical, 4)
+        } else {
+            Button { Presenter.shared.verify = true } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "person.crop.circle.fill").font(.system(size: 40)).foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sign in to Reddit").font(.headline).foregroundStyle(.primary)
+                        Text("Required to load your feed").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+}
+
+struct FiltersSettingsView: View {
+    private var library: Library { .shared }
+    var body: some View {
+        Form {
+            Section {
                 NavigationLink { FilterEditor(title: "Keywords", items: Binding(get: { library.filters.keywords }, set: { library.filters.keywords = $0 }), placeholder: "word or phrase") } label: {
                     LabeledContent("Keywords", value: "\(library.filters.keywords.count)")
                 }
-                NavigationLink { FilterEditor(title: "Communities", items: Binding(get: { library.filters.subreddits }, set: { library.filters.subreddits = $0 }), placeholder: "subreddit") } label: {
+                NavigationLink { FilterEditor(title: "Communities", items: Binding(get: { library.filters.subreddits }, set: { library.filters.subreddits = $0 }), placeholder: "community") } label: {
                     LabeledContent("Communities", value: "\(library.filters.subreddits.count)")
                 }
                 NavigationLink { FilterEditor(title: "Users", items: Binding(get: { library.filters.users }, set: { library.filters.users = $0 }), placeholder: "username") } label: {
@@ -160,46 +124,36 @@ struct SettingsView: View {
                 NavigationLink { FilterEditor(title: "Domains", items: Binding(get: { library.filters.domains }, set: { library.filters.domains = $0 }), placeholder: "example.com") } label: {
                     LabeledContent("Domains", value: "\(library.filters.domains.count)")
                 }
-            } header: { Text("Filters") } footer: { Text("Filtered posts never appear in any feed or search.") }
-
+            } footer: { Text("Filtered posts never appear in any feed or search.") }
             Section {
-                NetworkStatsView()
-                Stepper(value: $settings.requestsPerMinute, in: 3...30) {
-                    LabeledContent("Request Budget", value: "\(settings.requestsPerMinute) / min")
-                }
-                Picker("Cache Freshness", selection: $settings.cacheMode) { ForEach(CacheMode.allCases) { Text($0.label).tag($0) } }
-                Picker("Source", selection: $settings.source) { ForEach(ImageSource.allCases) { Text($0.label).tag($0) } }
-                Picker("Connection", selection: $settings.connection) { ForEach(ConnectionMode.allCases) { Text($0.label).tag($0) } }
-                NavigationLink { ConnectionLogView() } label: { Label("Connection Log", systemImage: "list.bullet.rectangle") }
-                NavigationLink { CrashReportsView() } label: { Label("Crash Reports", systemImage: "exclamationmark.octagon") }
-                LabeledContent("Cache", value: cacheInfo)
-                Button("Clear Cache", role: .destructive) {
-                    Task {
-                        await RedditClient.shared.clearCache()
-                        ImageLoader.shared.clear()
-                        await refreshCacheInfo()
-                        Presenter.shared.show("Cache cleared")
-                    }
-                }
-            } header: { Text("Network & Rate Limits") } footer: {
-                Text("Connection: Automatic tries a direct request and switches to the built-in browser engine if Reddit filters it. Qorvex reads Reddit's public pages directly from your iPhone — no API key, no account, no server. It paces itself under Reddit's anonymous limit and serves repeat views from cache, so it never hammers Reddit. Keep the budget at 10 or below. If Reddit ever pushes back, Qorvex automatically slows down and shows cached content.")
+                Toggle("Hide Read Posts", isOn: Binding(get: { AppSettings.shared.hideRead }, set: { AppSettings.shared.hideRead = $0 }))
+                Toggle("Collapse AutoModerator", isOn: Binding(get: { AppSettings.shared.collapseAutomod }, set: { AppSettings.shared.collapseAutomod = $0 }))
             }
+        }
+        .navigationTitle("Filters")
+    }
+}
 
+struct DataSettingsView: View {
+    private var library: Library { .shared }
+    @Bindable private var settings = AppSettings.shared
+    @State private var exporting = false
+    @State private var importing = false
+    @State private var confirmReset = false
+
+    var body: some View {
+        Form {
             Section {
                 Button { exporting = true } label: { Label("Export Backup", systemImage: "square.and.arrow.up") }
                 Button { importing = true } label: { Label("Import Backup", systemImage: "square.and.arrow.down") }
+            } footer: { Text("Saved posts, history and filters are stored on this device.") }
+            Section {
                 Button { library.clearHistory(); Presenter.shared.show("History cleared") } label: { Label("Clear Reading History", systemImage: "clock.arrow.circlepath") }
                 Button { library.hidden = []; Presenter.shared.show("Hidden posts restored") } label: { Label("Unhide All Posts", systemImage: "eye") }
                 Button(role: .destructive) { confirmReset = true } label: { Label("Reset Settings", systemImage: "arrow.counterclockwise") }
-            } header: { Text("Your Data") } footer: { Text("Communities, saved posts, history and filters live only on this device.") }
-
-            Section {
-                LabeledContent("Version", value: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))")
-                Text("Qorvex is an independent reader and is not affiliated with Reddit.").font(.footnote).foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Settings")
-        .task { await refreshCacheInfo(); await RedditAccount.refresh() }
+        .navigationTitle("Your Data")
         .fileExporter(isPresented: $exporting, document: BackupDocument(data: library.exportData()), contentType: .json, defaultFilename: "qorvex-backup") { result in
             if case .success = result { Presenter.shared.show("Backup exported") }
         }
@@ -215,6 +169,86 @@ struct SettingsView: View {
         .confirmationDialog("Reset all settings?", isPresented: $confirmReset, titleVisibility: .visible) {
             Button("Reset Settings", role: .destructive) { settings.reset() }
         }
+    }
+}
+
+struct AdvancedSettingsView: View {
+    @Bindable private var settings = AppSettings.shared
+    @State private var cacheInfo = "…"
+
+    var body: some View {
+        Form {
+            Section {
+                NetworkStatsView()
+                if settings.sessionCooldownUntil > Date() {
+                    Label("Reddit paused requests — retrying \(settings.sessionCooldownUntil.formatted(date: .omitted, time: .shortened))", systemImage: "pause.circle")
+                        .font(.footnote).foregroundStyle(.orange)
+                    Button("Retry Now") { settings.sessionCooldownUntil = .distantPast }
+                }
+                Stepper(value: $settings.requestsPerMinute, in: 3...30) {
+                    LabeledContent("Request Budget", value: "\(settings.requestsPerMinute) / min")
+                }
+                Picker("Cache Freshness", selection: $settings.cacheMode) { ForEach(CacheMode.allCases) { Text($0.label).tag($0) } }
+                Toggle("Data Saver", isOn: $settings.dataSaver)
+            } header: { Text("Network") } footer: {
+                Text("Qorvex paces its requests and reuses cached pages so it stays well under Reddit's limits.")
+            }
+
+            Section {
+                LabeledContent("Cache", value: cacheInfo)
+                Button("Clear Cache", role: .destructive) {
+                    Task {
+                        await RedditClient.shared.clearCache()
+                        ImageLoader.shared.clear()
+                        await refreshCacheInfo()
+                        Presenter.shared.show("Cache cleared")
+                    }
+                }
+                NavigationLink { ConnectionLogView() } label: { Label("Connection Log", systemImage: "list.bullet.rectangle") }
+                NavigationLink { CrashReportsView() } label: { Label("Crash Reports", systemImage: "exclamationmark.octagon") }
+            } header: { Text("Diagnostics") }
+
+            Section {
+                TextField("Client ID", text: $settings.apiClientID)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .font(.body.monospaced())
+                TextField("Redirect URI", text: $settings.apiRedirectURI)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .font(.body.monospaced())
+                TextField("User Agent", text: $settings.apiUserAgent, axis: .vertical)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .font(.footnote.monospaced())
+                if settings.apiSignedIn {
+                    Label("Connected with your API key", systemImage: "key.fill").foregroundStyle(.green)
+                    if settings.connection != .api { Button("Use API Key") { settings.connection = .api } }
+                    Button("Disconnect API Key", role: .destructive) {
+                        Task { await RedditAPISignIn.shared.signOut(); Presenter.shared.show("API key disconnected") }
+                    }
+                } else {
+                    Button {
+                        Task {
+                            do {
+                                try await RedditAPISignIn.shared.signIn()
+                                settings.connection = .api
+                                Haptics.success()
+                                Presenter.shared.show("Connected with your API key")
+                            } catch {
+                                Presenter.shared.show(error.localizedDescription)
+                            }
+                        }
+                    } label: { Label("Connect API Key", systemImage: "key") }
+                    .disabled(settings.apiClientID.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } header: { Text("Your Own API Key (Optional)") } footer: {
+                Text("If you have your own Reddit app (reddit.com/prefs/apps, type “installed app”), connect it here. Its redirect URI must match exactly. Not needed for normal use.")
+            }
+
+            Section {
+                Picker("Connection", selection: $settings.connection) { ForEach(ConnectionMode.allCases) { Text($0.label).tag($0) } }
+            } footer: { Text("Leave on Automatic unless you're troubleshooting.") }
+        }
+        .navigationTitle("Advanced")
+        .task { await refreshCacheInfo() }
     }
 
     private func refreshCacheInfo() async {

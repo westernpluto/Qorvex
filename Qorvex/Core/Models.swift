@@ -209,6 +209,7 @@ struct Comment: Decodable, Identifiable {
     var subreddit: String?
     var permalink: String?
     var replies: Replies?
+    var media_metadata: [String: MediaMeta]?
 
     var created: Date { Date(timeIntervalSince1970: created_utc) }
     var postID: String? { link_id.map { String($0.dropFirst(3)) } }

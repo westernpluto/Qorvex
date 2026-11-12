@@ -59,6 +59,13 @@ final class FeedModel {
             error = nil; staleNote = nil
             cursor = 0; subAfter = [:]; exhausted = []
         }
+        // Signed out: show example posts and send nothing to Reddit.
+        if !Self.hasAccount {
+            posts = SampleData.posts(for: source)
+            seen = Set(posts.map(\.id))
+            after = nil; done = true; loading = false
+            return
+        }
         // Signed in: Home is the account's own front page (your Reddit subscriptions, Reddit's order).
         if source == .home && (NetworkStatus.shared.signedIn || AppSettings.shared.fullAccess) && !Self.frontPageBlocked {
             if let e = await loadSingle(path: "", reset: reset, force: force, gen: gen) {
@@ -78,6 +85,8 @@ final class FeedModel {
             _ = await loadSingle(path: singlePath, reset: reset, force: force, gen: gen)
         }
     }
+
+    @MainActor static var hasAccount: Bool { NetworkStatus.shared.signedIn || AppSettings.shared.apiActive }
 
     /// Set once Reddit refuses the signed-in front page, so we don't keep asking this session.
     static var frontPageBlocked = false
@@ -185,7 +194,7 @@ struct FeedView: View {
         _model = State(initialValue: FeedModel(source: source))
     }
 
-    private var isRoot: Bool { source == .home || source == .popular }
+    private var isRoot: Bool { source == .home }
 
     private var filterCount: Int {
         let f = library.filters
@@ -200,13 +209,12 @@ struct FeedView: View {
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
+            if !FeedModel.hasAccount {
+                SignInBanner().plainRow()
+            }
             if source == .home && model.usingFrontPage && model.posts.isEmpty == false {
                 Label("Your Reddit front page", systemImage: "person.crop.circle.badge.checkmark")
                     .font(.footnote.weight(.semibold)).foregroundStyle(.secondary).plainRow()
-            }
-            if source == .home && library.subs.isEmpty && !model.usingFrontPage {
-                HintCard(icon: "sparkles", text: "Your Home shows Popular until you join communities. Find some in Search or Library.")
-                    .plainRow()
             }
             if let note = model.staleNote {
                 StaleBanner(text: note).plainRow()
@@ -233,12 +241,9 @@ struct FeedView: View {
         .onChange(of: library.hidden.count) { _, _ in model.posts.removeAll { library.hidden.contains($0.id) } }
     }
 
-    /// Home and custom feeds change source when sign-in or key-free mode is confirmed.
+    /// Reload when sign-in or full access changes (signed-out feeds show examples).
     private func reloadIfMulti() {
-        switch source {
-        case .home, .custom: Task { await model.load(reset: true) }
-        default: break
-        }
+        Task { await model.load(reset: true) }
     }
 
     @ViewBuilder private var footer: some View {
@@ -256,6 +261,21 @@ struct FeedView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        if source == .home {
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    Button { router.push(.feed(.popular)) } label: { Label("Popular", systemImage: "flame") }
+                    Button { router.push(.feed(.all)) } label: { Label("All", systemImage: "globe") }
+                    if !library.subs.isEmpty {
+                        Section("Your Communities") {
+                            ForEach(library.sortedSubs, id: \.self) { s in
+                                Button { router.push(.feed(.subreddit(s))) } label: { Text("r/\(s)") }
+                            }
+                        }
+                    }
+                } label: { Label("Feeds", systemImage: "square.stack") }
+            }
+        }
         ToolbarItemGroup(placement: .topBarTrailing) {
             Menu {
                 if Reddit.sortsAvailable {
@@ -295,21 +315,6 @@ struct FeedView: View {
                         Label(library.isSubscribed(sub) ? "Leave r/\(sub)" : "Join r/\(sub)", systemImage: library.isSubscribed(sub) ? "minus.circle" : "plus.circle")
                     }
                     Button { router.push(.search(sub: sub)) } label: { Label("Search r/\(sub)", systemImage: "magnifyingglass") }
-                    Menu {
-                        ForEach(library.feeds) { f in
-                            Button {
-                                if let i = library.feeds.firstIndex(of: f) {
-                                    if library.feeds[i].subs.contains(sub) { library.feeds[i].subs.removeAll { $0 == sub } } else { library.feeds[i].subs.append(sub) }
-                                }
-                                Presenter.shared.show("Updated \(f.name)")
-                            } label: {
-                                if f.subs.contains(sub) { Label(f.name, systemImage: "checkmark") } else { Text(f.name) }
-                            }
-                        }
-                        Button { library.feeds.append(CustomFeed(name: "New Feed", subs: [sub])); Presenter.shared.show("Created New Feed") } label: {
-                            Label("New Custom Feed", systemImage: "plus")
-                        }
-                    } label: { Label("Add to Custom Feed", systemImage: "square.stack.3d.up") }
                     ShareLink(item: URL(string: "https://www.reddit.com/r/\(sub)")!) { Label("Share", systemImage: "square.and.arrow.up") }
                     Button(role: .destructive) { library.filters.subreddits.append(sub); Presenter.shared.show("Filtered from your feeds") } label: {
                         Label("Filter from Home & Popular", systemImage: "nosign")

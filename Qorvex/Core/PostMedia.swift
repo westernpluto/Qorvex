@@ -91,12 +91,21 @@ extension Post {
             return .video(VideoInfo(hls: pv.hls_url.flatMap(URL.init(string:)), mp4: pv.fallback_url.flatMap(URL.init(string:)),
                                     poster: poster, size: CGSize(w: pv.width, h: pv.height), isGif: true, duration: nil))
         }
+        if let u = URL(string: urlString), urlString.range(of: #"\.(mp4|webm|mov|m3u8)(\?.*)?$"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            let isHLS = urlString.lowercased().contains(".m3u8")
+            let src = preview?.images?.first?.source
+            return .video(VideoInfo(hls: isHLS ? u : nil, mp4: isHLS ? nil : u, poster: poster, size: CGSize(w: src?.width, h: src?.height), isGif: false, duration: nil))
+        }
         let isImageURL = urlString.range(of: #"\.(jpe?g|png|webp|gif)(\?.*)?$"#, options: [.regularExpression, .caseInsensitive]) != nil
         if post_hint == "image" || isImageURL {
             if urlString.lowercased().contains(".gif"),
                let mp4 = preview?.images?.first?.variants?.mp4?.source.flatMap({ URL(string: $0.url) }) {
                 let src = preview?.images?.first?.source
                 return .video(VideoInfo(hls: nil, mp4: mp4, poster: poster, size: CGSize(w: src?.width, h: src?.height), isGif: true, duration: nil))
+            }
+            if urlString.lowercased().contains(".gif"), let u = URL(string: urlString) {
+                let src = preview?.images?.first?.source
+                return .image(GalleryEntry(id: id, url: u, full: u, size: CGSize(w: src?.width, h: src?.height), caption: nil, mp4: nil))
             }
             if let img = previewImage() { return .image(img) }
             if let u = URL(string: urlString) { return .image(GalleryEntry(id: id, url: u, full: u, size: nil, caption: nil, mp4: nil)) }
@@ -115,5 +124,52 @@ extension Post {
               let m = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
               let r = Range(m.range(at: 1), in: s) else { return nil }
         return String(s[r])
+    }
+}
+
+// MARK: - Inline media inside comments and text posts
+
+enum InlineMedia {
+    private static let urlRE = try! NSRegularExpression(
+        pattern: #"https?://(?:i\.redd\.it|preview\.redd\.it|i\.imgur\.com|media\d?\.giphy\.com|i\.giphy\.com)/[^\s)\]]+?\.(?:jpe?g|png|webp|gif|gifv|mp4)(?:\?[^\s)\]]*)?"#,
+        options: [.caseInsensitive])
+
+    static func entries(meta: [String: MediaMeta]?, text: String?, idPrefix: String) -> [GalleryEntry] {
+        var out: [GalleryEntry] = []
+        var seen = Set<String>()
+        for (key, m) in (meta ?? [:]).sorted(by: { $0.key < $1.key }) {
+            guard m.status == nil || m.status == "valid", let s = m.s else { continue }
+            let mp4 = s.mp4.flatMap(URL.init(string:))
+            guard let still = URL(string: s.gif ?? s.u ?? s.mp4 ?? "") else { continue }
+            if seen.insert(still.absoluteString).inserted {
+                out.append(GalleryEntry(id: idPrefix + key, url: still, full: still, size: CGSize(w: s.x, h: s.y), caption: nil, mp4: mp4))
+            }
+        }
+        if let text {
+            for match in urlRE.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                guard let r = Range(match.range, in: text) else { continue }
+                var str = String(text[r])
+                var mp4: URL? = nil
+                if str.lowercased().hasSuffix(".gifv") { str = String(str.dropLast(5)) + ".mp4" }
+                if str.lowercased().contains(".mp4") { mp4 = URL(string: str) }
+                guard let u = URL(string: str), seen.insert(u.absoluteString).inserted else { continue }
+                // A preview.redd.it link already covered by media_metadata shares the media id.
+                if let last = u.lastPathComponent.split(separator: ".").first, out.contains(where: { $0.id.hasSuffix(String(last)) }) { continue }
+                out.append(GalleryEntry(id: idPrefix + "\(out.count)", url: u, full: u, size: nil, caption: nil, mp4: mp4))
+            }
+        }
+        return out
+    }
+}
+
+extension Comment {
+    var inlineMedia: [GalleryEntry] { InlineMedia.entries(meta: media_metadata, text: body, idPrefix: "c\(id)-") }
+}
+
+extension Post {
+    /// Images/GIFs embedded in a text post's body.
+    var inlineMedia: [GalleryEntry] {
+        guard is_self == true else { return [] }
+        return InlineMedia.entries(meta: media_metadata, text: selftext, idPrefix: "p\(id)-")
     }
 }

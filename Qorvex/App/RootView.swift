@@ -1,15 +1,14 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case home, popular, search, library, settings
+    case home, search, saved, settings
     var id: String { rawValue }
     var label: String { rawValue.capitalized }
     var icon: String {
         switch self {
         case .home: return "house.fill"
-        case .popular: return "flame.fill"
         case .search: return "magnifyingglass"
-        case .library: return "books.vertical.fill"
+        case .saved: return "bookmark.fill"
         case .settings: return "gearshape.fill"
         }
     }
@@ -67,9 +66,8 @@ struct RootView: View {
     private func rootContent(_ t: AppTab) -> some View {
         switch t {
         case .home: FeedView(source: .home)
-        case .popular: FeedView(source: .popular)
         case .search: SearchView()
-        case .library: LibraryView()
+        case .saved: SavedTab()
         case .settings: SettingsView()
         }
     }
@@ -142,6 +140,7 @@ struct AdaptiveStack<Root: View>: View {
         }
         .onAppear(perform: configure)
         .onChange(of: settings.twoPane) { _, _ in configure() }
+        .onChange(of: sizeClass) { _, _ in configure() }
         .onChange(of: listRouter.compactColumn) { _, col in
             // Backing out of a post on the narrow display returns to the feed; clear the selection
             // so the wide layout doesn't show a stale post later.
@@ -149,14 +148,16 @@ struct AdaptiveStack<Root: View>: View {
         }
     }
 
+    /// Two columns only when there's room (inner display unfolded, landscape, iPad). On the narrow
+    /// outer display posts are pushed onto the stack like a normal iPhone app.
     private func configure() {
+        let wide = settings.twoPane && sizeClass == .regular
         listRouter.detail = detailRouter
-        detailRouter.list = settings.twoPane ? listRouter : nil
+        detailRouter.list = wide ? listRouter : nil
         listRouter.columns = .all
-        listRouter.splitActive = settings.twoPane
+        listRouter.splitActive = wide
         detailRouter.splitActive = false
-    }
-}
+    }}
 
 struct RouteDestination: View {
     let route: Route

@@ -155,8 +155,17 @@ struct JoinButton: View {
     var body: some View {
         let on = library.isSubscribed(name)
         Button {
+            let join = !on
             library.toggleSubscription(name)
             Haptics.success()
+            guard NetworkStatus.shared.signedIn else { return }
+            Task {
+                do { try await RedditClient.shared.subscribe(name, join: join) }
+                catch {
+                    library.toggleSubscription(name) // revert
+                    Presenter.shared.show("Couldn't \(join ? "join" : "leave") r/\(name)")
+                }
+            }
         } label: {
             Text(on ? "Joined" : "Join")
                 .font(.subheadline.weight(.semibold))
@@ -269,5 +278,30 @@ struct SubredditHeader: View {
             }
             .presentationDragIndicator(.visible)
         }
+    }
+}
+
+/// Shown at the top of feeds while signed out.
+struct SignInBanner: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.title2)
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sign in to Reddit").font(.headline)
+                    Text("These are example posts. Sign in to load your feed, communities and comments.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            Button { Presenter.shared.verify = true } label: {
+                Text("Sign In").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+        }
+        .padding(16)
+        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }

@@ -34,7 +34,9 @@ final class SearchModel {
             Library.shared.addRecent(q)
             searched = true
             loading = false
-            error = "Reddit blocks search for apps in web mode. Use “Go to r/…” or “Go to u/…” above, browse Discover, or switch to Reddit API mode in Settings."
+            error = FeedModel.hasAccount
+                ? "Search isn't available right now. Use “Go to r/…” or “Go to u/…” above, or browse Discover."
+                : "Sign in to Reddit to search."
             return
         }
         if more && (after == nil || loading) { return }

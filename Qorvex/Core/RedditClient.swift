@@ -215,7 +215,9 @@ actor RedditClient {
     // MARK: - Fetch
 
     private func download(_ path: String, host: String) async throws -> Data {
-        let (useAPI, useSession) = await MainActor.run { (AppSettings.shared.apiActive, AppSettings.shared.sessionRouteActive) }
+        let (useAPI, useSession, signedIn) = await MainActor.run { (AppSettings.shared.apiActive, AppSettings.shared.sessionRouteActive, AppSettings.shared.webSessionSignedIn) }
+        // A Reddit account is required: signed out, nothing is sent to Reddit at all.
+        guard useAPI || signedIn else { throw RedditError.loginRequired }
         if useAPI {
             try await acquireSlot()
             return try await viaAPI(path)
@@ -361,6 +363,7 @@ actor RedditClient {
     // MARK: Key-free web session route (cookie auth on oauth.reddit.com)
 
     private var sessionStreak = 0
+    private var modhash: String?
     private var sessionCooldownLevel = 0
 
     /// oauth.reddit.com takes listings with `.json`, but `/api/*` endpoints without it.
@@ -429,6 +432,28 @@ actor RedditClient {
 
     enum WhoAmI { case signedIn(String), signedOut, unknown }
 
+    /// Join or leave a community on the user's Reddit account (POST /api/subscribe on www,
+    /// authenticated by the web session and its modhash).
+    func subscribe(_ name: String, join: Bool) async throws {
+        let cookie = await RedditAccount.cookieHeader()
+        guard cookie.contains("reddit_session="), let modhash else { throw RedditError.loginRequired }
+        if userAgent == nil { userAgent = await MainActor.run { WebTransport.safariUserAgent } }
+        try await acquireSlot()
+        var req = URLRequest(url: URL(string: "https://www.reddit.com/api/subscribe")!)
+        req.httpMethod = "POST"
+        req.httpShouldHandleCookies = false
+        req.setValue(cookie, forHTTPHeaderField: "Cookie")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue(modhash, forHTTPHeaderField: "X-Modhash")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let sr = name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? name
+        req.httpBody = Data("action=\(join ? "sub" : "unsub")&sr_name=\(sr)&api_type=json".utf8)
+        let (data, response) = try await session.data(for: req, delegate: redirectCatcher)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        await log("write", req.url!, status, (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? "", nil, data)
+        guard (200..<300).contains(status) else { throw RedditError.http(status) }
+    }
+
     /// Verify the web session with www.reddit.com/api/me.json (the endpoint the website itself uses).
     /// Never counts toward the session-route cooldown.
     func whoAmI() async -> WhoAmI {
@@ -451,6 +476,7 @@ actor RedditClient {
             }
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             let d = (obj?["data"] as? [String: Any]) ?? obj
+            if let mh = d?["modhash"] as? String, !mh.isEmpty { modhash = mh }
             if let name = d?["name"] as? String, !name.isEmpty { return .signedIn(name) }
             return .signedOut
         } catch {

@@ -224,9 +224,24 @@ enum RedditAccount {
         lastCheck = Date()
         let result = await RedditClient.shared.whoAmI()
         switch result {
-        case .signedIn(let name): set(true, name: name)
+        case .signedIn(let name):
+            set(true, name: name)
+            await syncCommunities()
         case .signedOut: set(false, name: nil)
         case .unknown: set(true, name: NetworkStatus.shared.username) // network issue: trust the cookie for now
+        }
+    }
+
+    private static var synced = false
+
+    /// Mirror the account's joined communities into Qorvex (once per launch).
+    static func syncCommunities() async {
+        guard !synced else { return }
+        synced = true
+        if let names = try? await Reddit.mySubscriptions(), !names.isEmpty {
+            Library.shared.subs = names
+        } else {
+            synced = false
         }
     }
 

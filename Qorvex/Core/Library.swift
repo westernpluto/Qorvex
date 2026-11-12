@@ -63,7 +63,7 @@ final class Library {
 
     private init() {
         let snap = (try? Data(contentsOf: Library.fileURL)).flatMap { try? JSONDecoder().decode(Snapshot.self, from: $0) }
-        subs = snap?.subs ?? Library.defaultSubs
+        subs = snap?.subs ?? []
         saved = snap?.saved ?? []
         history = snap?.history ?? []
         hidden = Set(snap?.hidden ?? [])

@@ -1,104 +1,48 @@
 # Qorvex
 
-A native iOS Reddit reader built in Swift and SwiftUI. It's free, private, and needs no account.
-
-Qorvex reads Reddit's public JSON pages directly from your iPhone. There's no API key, no OAuth app, no login, and no server in the middle. Every request comes from your own device.
-
-## Reddit account
-
-Reddit now redirects signed-out requests for feed data to its login page, so Qorvex asks you to **sign in once on reddit.com itself** (in an in-app Reddit page). Qorvex never sees your password. It reads with that session the way Safari would, and still paces itself under the limits below. Sign out any time in Settings → Reddit Account.
-
-## Reddit API mode (optional, your own key)
-
-Like Apollo Reborn, Qorvex can use the official Reddit API with **your own** API app. That unlocks everything web mode can't: all sorts, search, multi-community Home, "load more replies" and community info, at up to 60 requests/min (Reddit allows 100).
-
-1. On reddit.com/prefs/apps, use an **installed app** you own. Its redirect URI must exactly match the one in Qorvex (default `qorvex://auth`).
-2. In Qorvex → Settings → Reddit API, enter the Client ID, Redirect URI and a User Agent naming your own username, e.g. `ios:com.qorvex.reader:v1.0 (by /u/yourname)`.
-3. Tap **Sign In with Reddit API** and approve on Reddit's official page. Tokens are stored in the iOS Keychain.
-
-Use your own credentials. Borrowing another app's client ID or User Agent breaks Reddit's terms and gets keys revoked. Note that Reddit currently restricts creating new API keys.
-
-## About rate limits
-
-Reddit limits anonymous traffic to roughly 10 requests per minute per IP. Qorvex never goes over that limit:
-
-- **Request budget:** a built-in governor spaces requests out (9/min by default, adjustable in Settings). Extra requests wait in a queue instead of being rejected, and a small "Pacing requests…" pill appears while they wait.
-- **On-disk cache:** every page is cached, so going back, reopening a post, or switching tabs costs zero requests. You can set how fresh the cache stays (1 / 5 / 30 min).
-- **Deduplication:** identical requests that are in flight at the same time share one network call.
-- **Graceful fallback:** if Reddit ever answers 429, Qorvex backs off, lowers its own budget, and shows the cached copy with a banner. It never shows an error screen when cached data exists.
-- **Media is free:** images and videos load from Reddit's CDN (`i.redd.it`, `v.redd.it`, `preview.redd.it`), which doesn't count against the JSON limit. They're cached in a 500 MB disk cache.
-
-Normal reading uses about one request per screen you open (a feed page, a post's comments), so the budget is rarely the bottleneck.
+A native iOS Reddit app built in Swift and SwiftUI, designed for iPhone Duo. Sign in with your Reddit account to read your feed.
 
 ## Features
 
-**Browsing**
-- Home (built from your joined communities), Popular, All, any subreddit, custom multi-community feeds
-- Sorts: Hot, New, Top, Rising, Controversial, with time ranges
-- Card or compact layout, infinite scroll, pull to refresh, skeleton loading
-- Subreddit headers with banner, icon, member and online counts, Join, and the full sidebar
-- User profiles: overview, posts and comments, with karma and account age
-
-**Posts & comments**
-- Threaded comments with colored depth rails; tap to collapse, swipe to collapse the whole thread
-- Six comment sorts, "load more replies", "continue this thread", single-thread permalinks
-- Floating next-comment button (long-press jumps to the previous one)
-- Reddit markdown rendered natively: headings, quotes, lists, code, tables, links, tap-to-reveal spoilers
-- OP, MOD and ADMIN badges, user flair, pinned comments, AutoModerator auto-collapse
-
-**Media**
-- Full-screen viewer with real pinch and double-tap zoom, swipe between gallery images, swipe down to dismiss, save to Photos, share
-- Swipeable galleries, including animated items
-- Reddit video over HLS with sound, through the native player (Picture in Picture supported)
-- Muted autoplay in feeds that pauses off-screen; GIF/GIFV converted to video; YouTube opens in the app or Safari
-- NSFW and spoiler blur with tap to reveal
-
-**Native iOS**
-- Swipe actions (right to save, left to hide or share), long-press context menus everywhere
-- In-app Safari with optional Reader mode, haptics, Dynamic Type sizes
-- Two-pane layout (feed | post) on wide screens: an unfolded phone, a large iPhone in landscape, or iPad
-- Light, Dark, Automatic and Midnight Black (OLED) themes, with 8 accent colors
-
-**Your data (stored only on device)**
-- Joined communities, saved posts (readable offline), reading history, hidden posts
-- Filters by keyword, community, user and domain
-- Export and import a JSON backup
+- **Your Reddit:** your front page, communities, sorts (Hot, New, Top, Rising, Controversial), search, profiles and threaded comments
+- **Media in place:** images, galleries, Reddit video, GIFs, direct video links and YouTube play inline, in feeds, posts and comments
+- **Comments:** clear dividers, colored depth rails, tap to collapse, a next-comment button and inline "load more"
+- **Minimal:** four tabs (Home, Search, Saved, Settings), with a feed switcher on Home for Popular, All and your communities
+- **Native:** swipe actions, long-press menus, haptics, Dynamic Type, Light / Dark / Midnight Black themes
+- **Private:** saved posts, history and filters stay on your device
 
 ## iPhone Duo
 
-Qorvex follows Apple's [Preparing your app for iPhone Duo](https://developer.apple.com/documentation/technologyoverviews/preparing-your-app-for-iphone-duo) guidance:
+Built around Apple's iPhone Duo guidance:
 
-- **One layout across every posture.** A single `NavigationSplitView` shows the feed and the post side by side on the inner display. It collapses into a single stack on the outer display, so folding or unfolding keeps the post you're reading.
-- **System containers only.** Tab bar, split view, navigation stacks and sheets, so the system can move bars to the side of the display and keep content clear of the fold and cameras.
-- **Vertical-bar ready.** Every toolbar item has both an icon and a title, which items need in order to appear in vertical bars.
-- **Container-relative sizing.** No fixed iPhone dimensions, no `UIDevice` idiom or orientation checks. Media scales to its container's width.
+- **One layout across postures.** On the inner display, the feed and the post sit side by side. On the outer display, posts open full screen like a normal iPhone app. Folding or unfolding keeps your place.
+- **System containers only** (tab bar, split view, navigation stacks), so bars can move to the side of the display and content stays clear of the fold and cameras.
+- **Vertical-bar ready:** every toolbar item has an icon and a title.
+- **Container-relative layout:** no fixed screen sizes or device checks.
+- **Built with Xcode 27** so the app uses the full screen.
 
-> **Built with Xcode 27** so the app uses the Duo's full screen. Apple notes that apps built with Xcode 26 or earlier don't extend under the status bar and camera. CI runs on GitHub's `xcode-27` runner image.
+## Your Reddit account
 
-## Installing it for free
+Sign in once on reddit.com's own page inside the app. Qorvex never sees your password. While signed out, Qorvex sends nothing to Reddit and shows example posts instead.
 
-You need a signed build to run any iOS app. Without a paid Apple Developer account, there are two free routes:
+Requests are paced and cached so the app stays well under Reddit's limits. If Reddit pushes back, Qorvex pauses and shows cached content.
 
-### Option A: no Mac (sideload the IPA from CI)
-1. Every push builds an **unsigned IPA** on GitHub Actions. Open the repo's **Actions** tab → latest "Build iOS app" run → download the **Qorvex-1.0.N** artifact (N is the build number, also shown in Settings → Version) and unzip it.
-2. Install it with a sideloading tool that signs with your free Apple ID, such as **SideStore**, **AltStore**, or **Sideloadly**.
-3. Apple limits free-account apps to 7 days, so the tool re-signs it weekly (SideStore and AltStore can do this automatically on-device).
+## Your own API key (optional)
 
-### Option B: with a Mac
-1. Open `Qorvex.xcodeproj` in Xcode 16 or newer.
-2. Select the **Qorvex** target → *Signing & Capabilities* → set **Team** to your Apple ID (Personal Team). Change the bundle identifier if Xcode asks.
-3. Plug in your iPhone, pick it as the run destination, and press **Run**. With a free account it also needs a re-run every 7 days.
+If you have your own Reddit app (reddit.com/prefs/apps, type "installed app"), you can connect it in Settings → Advanced. The redirect URI must match exactly (default `qorvex://auth`).
 
-A paid Apple Developer account ($99/yr) removes the 7-day limit and allows TestFlight.
+## Installing
+
+Every push builds an unsigned IPA on GitHub Actions (Xcode 27 runner). Download the **Qorvex-1.0.N** artifact from the Actions tab and install it with a sideloading tool that signs with your Apple ID. With a Mac, you can instead open `Qorvex.xcodeproj` in Xcode, set your team and run it on your iPhone. Free Apple IDs need re-signing every 7 days.
 
 ## Project layout
 
 ```
 Qorvex/
   App/         App entry, tab bar, adaptive split navigation
-  Core/        Models, Reddit client (rate governor + cache), settings, library, markdown, routing
-  Components/  Post rows, media views, video/zoom/Safari wrappers, shared UI
-  Views/       Feed, post & comments, search, library, user, settings
+  Core/        Models, Reddit client, settings, library, markdown, routing, sample content
+  Components/  Post rows, media views, inline media, shared UI
+  Views/       Feed, post & comments, search, saved, profile, settings
 ```
 
 Requires iOS 17+. No third-party dependencies.

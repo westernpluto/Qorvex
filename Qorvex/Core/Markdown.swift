@@ -157,6 +157,7 @@ enum Markdown {
     }
 
     private static let replacements: [(NSRegularExpression, String)] = [
+        (try! NSRegularExpression(pattern: #"!\[[^\]]*\]\([^)]*\)"#), ""),
         (try! NSRegularExpression(pattern: #">!(.+?)!<"#), "\u{FFF9}$1\u{FFFB}"),
         (try! NSRegularExpression(pattern: #"\^\((.+?)\)"#), "$1"),
         (try! NSRegularExpression(pattern: #"(^|\s)\^(\S+)"#), "$1$2"),

@@ -79,6 +79,13 @@ final class CommentsModel {
     func load(force: Bool = false) async {
         loading = true
         error = nil
+        // Signed out (or an example post): show example comments, no requests.
+        if SampleData.isSample(postID) || !FeedModel.hasAccount {
+            nodes = SampleData.comments(author: post?.author ?? "")
+            loaded = true
+            loading = false
+            return
+        }
         do {
             let r = try await Reddit.comments(postID: postID, permalink: post?.permalink, commentID: commentID, sort: sort, force: force)
             let collapseAuto = AppSettings.shared.collapseAutomod
@@ -161,6 +168,54 @@ final class CommentsModel {
             Presenter.shared.show(error.localizedDescription)
             return true
         }
+    }
+}
+
+extension CommentsModel {
+    /// Fills in a "load more" by fetching that part of the thread and splicing its replies in
+    /// place — used when the dedicated endpoint returns nothing.
+    @MainActor
+    func expandViaThread(_ node: CommentNode) async -> Bool {
+        guard case .more(let m) = node.kind else { return false }
+        let parentIsComment = (m.parent_id ?? "").hasPrefix("t1_")
+        let target = parentIsComment ? String((m.parent_id ?? "").dropFirst(3)) : (m.children.first ?? "")
+        guard !target.isEmpty else { return false }
+        loadingMore.insert(node.id)
+        defer { loadingMore.remove(node.id) }
+        do {
+            let r = try await Reddit.comments(postID: postID, permalink: post?.permalink, commentID: target, sort: sort)
+            let things = r.value.count > 1 ? r.value[1].data.children : []
+            guard let found = Self.find(target, in: things) else { return false }
+            var out: [CommentNode] = []
+            if parentIsComment {
+                _ = Self.flatten(found.replies?.children ?? [], depth: node.depth, into: &out)
+            } else {
+                _ = Self.flatten([.comment(found)], depth: node.depth, into: &out)
+                if m.children.count > 1 {
+                    var rest = m
+                    rest.children = Array(m.children.dropFirst())
+                    rest.count = rest.children.count
+                    out.append(CommentNode(id: "more-\(m.id)-\(rest.children.count)", kind: .more(rest), depth: node.depth))
+                }
+            }
+            let existing = Set(nodes.map(\.id))
+            let fresh = out.filter { !existing.contains($0.id) }
+            let gotComments = fresh.contains { if case .comment = $0.kind { return true } else { return false } }
+            guard gotComments, let idx = nodes.firstIndex(where: { $0.id == node.id }) else { return false }
+            nodes.replaceSubrange(idx...idx, with: fresh)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    static func find(_ id: String, in things: [Thing]) -> Comment? {
+        for t in things {
+            guard case .comment(let c) = t else { continue }
+            if c.id == id { return c }
+            if let f = find(id, in: c.replies?.children ?? []) { return f }
+        }
+        return nil
     }
 }
 
@@ -285,8 +340,9 @@ struct PostDetailView: View {
                        hidden: node.descendants, isOP: c.author == model.post?.author && c.author != "[deleted]",
                        highlighted: c.id == ref.commentID)
                 .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
-                .listRowSeparator(node.depth == 0 ? .visible : .hidden, edges: .top)
-                .listRowSeparator(.hidden, edges: .bottom)
+                .listRowSeparator(.hidden, edges: .top)
+                .listRowSeparator(.visible, edges: .bottom)
+                .listRowSeparatorTint(Color.secondary.opacity(node.depth == 0 ? 0.35 : 0.2))
                 .listRowBackground(c.id == ref.commentID ? Color.accentColor.opacity(0.1) : Color.cardBackground)
                 .contentShape(Rectangle())
                 .onTapGesture { withAnimation(.snappy(duration: 0.25)) { model.toggle(node.id) }; Haptics.tap(.soft) }
@@ -316,7 +372,9 @@ struct PostDetailView: View {
             Button {
                 if Reddit.apiActive {
                     Task {
-                        if await model.loadMore(node) == false { openMoreThread(m) }
+                        if await model.loadMore(node) { return }
+                        if await model.expandViaThread(node) { return }
+                        openMoreThread(m)
                     }
                 } else if let parent = m.parent_id, parent.hasPrefix("t1_") {
                     router.push(.post(PostRef(id: ref.id, commentID: String(parent.dropFirst(3)), preview: model.post)))
@@ -439,6 +497,10 @@ struct PostDetailHeader: View {
 
             PostMediaView(post: post, detail: true)
 
+            if post.is_gallery != true {
+                ForEach(post.inlineMedia) { InlineMediaView(entry: $0) }
+            }
+
             if !blocks.isEmpty {
                 MarkdownView(blocks: blocks)
                     .font(.body)
@@ -540,11 +602,14 @@ struct CommentRow: View {
                 if !collapsed {
                     MarkdownView(blocks: blocks)
                         .font(.subheadline)
+                    ForEach(comment.inlineMedia) { InlineMediaView(entry: $0) }
                 }
             }
             .padding(.vertical, 9)
         }
         .padding(.leading, CGFloat(max(0, depth - 1)) * 12)
+        // Dividers start where this comment's indentation starts.
+        .alignmentGuide(.listRowSeparatorLeading) { _ in CGFloat(max(0, depth - 1)) * 12 }
         .opacity(collapsed ? 0.7 : 1)
     }
 

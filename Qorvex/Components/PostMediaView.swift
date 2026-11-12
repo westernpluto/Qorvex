@@ -6,6 +6,7 @@ struct PostMediaView: View {
     var detail = false
     @State private var revealed = false
     @State private var page = 0
+    @State private var playingYouTube = false
 
     private var blurred: Bool {
         guard !revealed else { return false }
@@ -22,7 +23,11 @@ struct PostMediaView: View {
         switch post.mediaKind {
         case .image(let e):
             framed(aspect: aspect(e.size, cap: detail ? 1.8 : 1.25)) {
-                RemoteImage(url: e.url)
+                if e.url.pathExtension.lowercased() == "gif" {
+                    AnimatedGIFView(url: e.url)
+                } else {
+                    RemoteImage(url: e.url)
+                }
             }
             .overlay(alignment: .bottomLeading) {
                 if let s = e.size, s.height / s.width > (detail ? 1.8 : 1.25) { tag("Tall image", icon: "arrow.up.and.down") }
@@ -51,19 +56,24 @@ struct PostMediaView: View {
                 InlineVideo(info: v, detail: detail)
             }
 
-        case .youtube(_, let url, let thumb):
+        case .youtube(let id, _, let thumb):
             framed(aspect: 16.0 / 9.0) {
-                ZStack {
-                    RemoteImage(url: thumb)
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 62, height: 62)
-                        .background(Color.red.gradient, in: Circle())
-                        .shadow(radius: 8)
+                if playingYouTube {
+                    YouTubeEmbed(id: id)
+                } else {
+                    ZStack {
+                        RemoteImage(url: thumb)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 62, height: 62)
+                            .background(Color.red.gradient, in: Circle())
+                            .shadow(radius: 8)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { if !blurred { playingYouTube = true } }
                 }
             }
-            .onTapGesture { if !blurred { UIApplication.shared.open(url) } }
 
         case .link(let url, let domain, let thumb):
             LinkCard(url: url, domain: domain, thumb: thumb)
