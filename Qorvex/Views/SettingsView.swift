@@ -137,7 +137,7 @@ struct SettingsView: View {
             } header: { Text("Your Data") } footer: { Text("Communities, saved posts, history and filters live only on this device.") }
 
             Section {
-                LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                LabeledContent("Version", value: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))")
                 Text("Qorvex is an independent reader and is not affiliated with Reddit.").font(.footnote).foregroundStyle(.secondary)
             }
         }

@@ -66,7 +66,7 @@ Qorvex follows Apple's [Preparing your app for iPhone Duo](https://developer.app
 You need a signed build to run any iOS app. Without a paid Apple Developer account, there are two free routes:
 
 ### Option A: no Mac (sideload the IPA from CI)
-1. Every push builds an **unsigned IPA** on GitHub Actions. Open the repo's **Actions** tab → latest "Build iOS app" run → download the **Qorvex-unsigned-ipa** artifact and unzip it.
+1. Every push builds an **unsigned IPA** on GitHub Actions. Open the repo's **Actions** tab → latest "Build iOS app" run → download the **Qorvex-1.0.N** artifact (N is the build number, also shown in Settings → Version) and unzip it.
 2. Install it with a sideloading tool that signs with your free Apple ID, such as **SideStore**, **AltStore**, or **Sideloadly**.
 3. Apple limits free-account apps to 7 days, so the tool re-signs it weekly (SideStore and AltStore can do this automatically on-device).
 
