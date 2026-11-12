@@ -1,0 +1,245 @@
+import SwiftUI
+
+struct HintCard: View {
+    let icon: String
+    let text: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon).font(.title3).foregroundStyle(Color.accentColor)
+            Text(text).font(.subheadline).foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+struct StaleBanner: View {
+    let text: String
+    var body: some View {
+        Label(text, systemImage: "clock.arrow.circlepath")
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+struct EmptyState: View {
+    let icon: String
+    let title: String
+    var message: String = ""
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(Color.accentColor.gradient)
+                .frame(width: 76, height: 76)
+                .background(Color.accentColor.opacity(0.12), in: Circle())
+            Text(title).font(.headline)
+            if !message.isEmpty {
+                Text(message).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48).padding(.horizontal, 24)
+    }
+}
+
+struct ErrorState: View {
+    let message: String
+    let retry: () -> Void
+    var body: some View {
+        VStack(spacing: 14) {
+            EmptyState(icon: "exclamationmark.triangle", title: message, message: "Your cached and saved posts still work offline.")
+            Button("Try Again", action: retry)
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+        }
+        .padding(.bottom, 24)
+    }
+}
+
+struct SkeletonFeed: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            ForEach(0..<3, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack { Circle().frame(width: 20, height: 20); RoundedRectangle(cornerRadius: 4).frame(width: 140, height: 10) }
+                    RoundedRectangle(cornerRadius: 5).frame(height: 14)
+                    RoundedRectangle(cornerRadius: 5).frame(width: 200, height: 14)
+                    RoundedRectangle(cornerRadius: 12).frame(height: 190)
+                }
+                .foregroundStyle(Color.secondary.opacity(0.14))
+                .overlay(ShimmerView())
+                .padding(14)
+                .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+        }
+    }
+}
+
+struct Toast: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 18).padding(.vertical, 11)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(color: .black.opacity(0.18), radius: 16, y: 6)
+    }
+}
+
+/// Small floating pill shown while the request governor is pacing.
+struct PacingPill: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.mini)
+            Text("Pacing requests to stay under Reddit's limit").font(.caption.weight(.semibold))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(.regularMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+    }
+}
+
+struct SubredditRow: View {
+    let sub: Subreddit
+    private var library: Library { .shared }
+    var body: some View {
+        HStack(spacing: 12) {
+            Avatar(name: sub.display_name, url: sub.iconURL, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("r/\(sub.display_name)").font(.subheadline.weight(.semibold))
+                    if sub.over18 == true { Badge(text: "NSFW", color: .red) }
+                }
+                Text([sub.subscribers.map { "\($0.compact) members" }, sub.public_description].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 0)
+            JoinButton(name: sub.display_name)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct JoinButton: View {
+    let name: String
+    private var library: Library { .shared }
+    var body: some View {
+        let on = library.isSubscribed(name)
+        Button {
+            library.toggleSubscription(name)
+            Haptics.success()
+        } label: {
+            Text(on ? "Joined" : "Join")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                .foregroundStyle(on ? Color.primary : Color.white)
+                .background(on ? AnyShapeStyle(Color.secondary.opacity(0.18)) : AnyShapeStyle(Color.accentColor.gradient), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .animation(.snappy, value: on)
+    }
+}
+
+struct UserRow: View {
+    let user: RedditUser
+    var body: some View {
+        HStack(spacing: 12) {
+            Avatar(name: user.name, url: user.iconURL, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("u/\(user.name)").font(.subheadline.weight(.semibold))
+                Text("\(user.karma.compact) karma").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Header with banner, icon, stats and join button.
+struct SubredditHeader: View {
+    let name: String
+    @State private var info: Subreddit?
+    @State private var showAbout = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack {
+                LinearGradient(colors: [Avatar.color(name), Avatar.color(name + "x").opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                if let b = info?.bannerURL { RemoteImage(url: b) }
+            }
+            .frame(height: 110)
+            .clipped()
+            .overlay(LinearGradient(colors: [.clear, .black.opacity(0.25)], startPoint: .top, endPoint: .bottom))
+
+            HStack(alignment: .bottom, spacing: 12) {
+                Avatar(name: name, url: info?.iconURL, size: 68)
+                    .overlay(Circle().stroke(Color.appBackground, lineWidth: 4))
+                    .offset(y: -22)
+                    .padding(.bottom, -22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(info?.title?.isEmpty == false ? info!.title! : "r/\(name)")
+                        .font(.title3.weight(.bold)).lineLimit(2)
+                    HStack(spacing: 4) {
+                        Text("r/\(info?.display_name ?? name)")
+                        if let s = info?.subscribers { Text("· \(s.compact) members") }
+                        if let o = info?.online, o > 0 {
+                            Text("·")
+                            Circle().fill(.green).frame(width: 6, height: 6)
+                            Text("\(o.compact)")
+                        }
+                    }
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                JoinButton(name: name)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+
+            if let d = info?.public_description, !d.isEmpty {
+                Text(Markdown.plain(d))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .padding(.horizontal, 16).padding(.top, 10)
+                    .onTapGesture { showAbout = true }
+            }
+            Button { showAbout = true } label: {
+                Label("About this community", systemImage: "info.circle").font(.footnote.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
+        .task { if info == nil { info = try? await Reddit.about(name) } }
+        .sheet(isPresented: $showAbout) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let i = info {
+                            HStack(spacing: 14) {
+                                Avatar(name: name, url: i.iconURL, size: 56)
+                                VStack(alignment: .leading) {
+                                    Text("r/\(i.display_name)").font(.title3.bold())
+                                    if let s = i.subscribers { Text("\(s.compact) members").foregroundStyle(.secondary) }
+                                }
+                            }
+                            MarkdownView(blocks: Markdown.parse(i.description?.isEmpty == false ? i.description! : (i.public_description ?? "No description.")))
+                        } else {
+                            ProgressView().frame(maxWidth: .infinity)
+                        }
+                    }
+                    .padding(20)
+                }
+                .navigationTitle("About")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showAbout = false } } }
+            }
+            .presentationDragIndicator(.visible)
+        }
+    }
+}
