@@ -628,7 +628,12 @@ struct CommentRow: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 5) {
-                    Avatar(name: comment.author, url: AvatarStore.shared.url(for: comment.author), size: 20)
+                    Avatar(name: comment.author, url: AvatarStore.shared.url(for: comment.author), size: 22)
+                        .task(id: comment.author) {
+                            // Give the batch lookup a moment; fall back per visible commenter if needed.
+                            try? await Task.sleep(nanoseconds: 1_500_000_000)
+                            await AvatarStore.shared.ensureSingle(comment.author)
+                        }
                     Text(comment.author)
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(authorColor)
