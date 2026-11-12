@@ -215,9 +215,9 @@ actor RedditClient {
     // MARK: - Fetch
 
     private func download(_ path: String, host: String) async throws -> Data {
-        let (useAPI, useSession, signedIn) = await MainActor.run { (AppSettings.shared.apiActive, AppSettings.shared.sessionRouteActive, AppSettings.shared.webSessionSignedIn) }
+        let (useAPI, useSession, hasAccount) = await MainActor.run { (AppSettings.shared.apiActive, AppSettings.shared.sessionRouteActive, AppSettings.shared.webSessionSignedIn) }
         // A Reddit account is required: signed out, nothing is sent to Reddit at all.
-        guard useAPI || signedIn else { throw RedditError.loginRequired }
+        guard useAPI || hasAccount else { throw RedditError.loginRequired }
         if useAPI {
             try await acquireSlot()
             return try await viaAPI(path)
