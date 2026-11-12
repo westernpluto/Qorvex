@@ -65,8 +65,16 @@ struct SearchView: View {
 
     var body: some View {
         List {
-            if !model.searched || text.isEmpty {
+            Picker("Search for", selection: $model.scope) {
+                ForEach(SearchScope.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            if text.trimmingCharacters(in: .whitespaces).isEmpty {
                 explore
+            } else if !model.searched {
+                Section { suggestions }
             } else {
                 results
             }
@@ -76,11 +84,7 @@ struct SearchView: View {
         .background(Color.appBackground)
         .navigationTitle(sub.map { "Search r/\($0)" } ?? "Search")
         .navigationBarTitleDisplayMode(restrictTo == nil ? .large : .inline)
-        .searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: sub.map { "Search r/\($0)" } ?? "Posts, communities, people")
-        .searchScopes($model.scope) {
-            ForEach(SearchScope.allCases) { Text($0.label).tag($0) }
-        }
-        .searchSuggestions { suggestions }
+        .searchable(text: $text, prompt: sub.map { "Search r/\($0)" } ?? "Posts, communities, people")
         .onSubmit(of: .search) { Task { await model.run(text, sub: sub) } }
         .onChange(of: model.scope) { _, _ in if !text.isEmpty && model.searched { Task { await model.run(text, sub: sub) } } }
         .onChange(of: text) { _, new in if new.isEmpty { model.searched = false } }
@@ -110,13 +114,16 @@ struct SearchView: View {
         let q = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "r/", with: "")
         if !q.isEmpty {
             if q.range(of: #"^\w{2,21}$"#, options: .regularExpression) != nil {
-                Button { router.push(.feed(.subreddit(q))) } label: { Label("Go to r/\(q)", systemImage: "arrow.right.circle") }
-                Button { router.push(.user(q)) } label: { Label("Go to u/\(q)", systemImage: "person.crop.circle") }
+                NavigationLink(value: Route.feed(.subreddit(q))) { Label("Go to r/\(q)", systemImage: "arrow.right.circle") }
+                NavigationLink(value: Route.user(q)) { Label("Go to u/\(q)", systemImage: "person.crop.circle") }
             }
             ForEach(library.sortedSubs.filter { $0.localizedCaseInsensitiveContains(q) }.prefix(6), id: \.self) { s in
-                Button { router.push(.feed(.subreddit(s))) } label: {
+                NavigationLink(value: Route.feed(.subreddit(s))) {
                     HStack { Avatar(name: s, size: 24); Text("r/\(s)"); Spacer(); Text("Joined").font(.caption).foregroundStyle(.secondary) }
                 }
+            }
+            Button { Task { await model.run(text, sub: sub) } } label: {
+                Label("Search “\(text.trimmingCharacters(in: .whitespaces))”", systemImage: "magnifyingglass")
             }
         }
     }

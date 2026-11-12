@@ -127,6 +127,7 @@ struct SettingsView: View {
                 Picker("Source", selection: $settings.source) { ForEach(ImageSource.allCases) { Text($0.label).tag($0) } }
                 Picker("Connection", selection: $settings.connection) { ForEach(ConnectionMode.allCases) { Text($0.label).tag($0) } }
                 NavigationLink { ConnectionLogView() } label: { Label("Connection Log", systemImage: "list.bullet.rectangle") }
+                NavigationLink { CrashReportsView() } label: { Label("Crash Reports", systemImage: "exclamationmark.octagon") }
                 LabeledContent("Cache", value: cacheInfo)
                 Button("Clear Cache", role: .destructive) {
                     Task {
@@ -291,5 +292,38 @@ struct ConnectionLogView: View {
                 .disabled(status.log.isEmpty)
             }
         }
+    }
+}
+
+struct CrashReportsView: View {
+    @State private var reports = CrashReporter.load()
+
+    var body: some View {
+        List {
+            if reports.isEmpty {
+                Text("No crash reports yet. iOS delivers them the next time the app opens after a crash.").foregroundStyle(.secondary)
+            }
+            ForEach(reports) { r in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(r.date.formatted(date: .abbreviated, time: .standard)).font(.subheadline.weight(.semibold))
+                    Text(r.summary).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    Button {
+                        UIPasteboard.general.string = r.summary + "\n\n" + r.details
+                        Presenter.shared.show("Crash report copied")
+                    } label: { Label("Copy Full Report", systemImage: "doc.on.doc") }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.borderless)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .navigationTitle("Crash Reports")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) { CrashReporter.clear(); reports = [] } label: { Label("Clear", systemImage: "trash") }
+                    .disabled(reports.isEmpty)
+            }
+        }
+        .refreshable { reports = CrashReporter.load() }
     }
 }
