@@ -79,7 +79,11 @@ jobs:
           xcrun simctl list runtimes > shots/runtimes.txt
           TYPE=$(xcrun simctl list devicetypes | grep -i "duo" | head -1 | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/')
           [ -z "$TYPE" ] && TYPE=$(xcrun simctl list devicetypes | grep -i "iPhone" | tail -1 | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/')
-          RUNTIME=$(xcrun simctl list runtimes | grep -i "iOS" | tail -1 | sed -E 's/.* - (com\.apple[^ ]*).*/\1/')
+          # The Duo ships with its own runtime build (e.g. iOS-27-2-iPhone19-4); prefer it.
+          RUNTIME=$(xcrun simctl list runtimes | grep -i "iPhone19" | tail -1 | sed -E 's/.* - (com\.apple[^ ]*).*/\1/')
+          [ -z "$RUNTIME" ] && RUNTIME=$(xcrun simctl list runtimes | grep -i "iOS" | tail -1 | sed -E 's/.* - (com\.apple[^ ]*).*/\1/')
+          xcrun simctl help > shots/simctl-help.txt 2>&1 || true
+          xcrun simctl ui 2> shots/simctl-ui.txt || true
           echo "Device type: $TYPE  Runtime: $RUNTIME" | tee shots/device.txt
           UDID=$(xcrun simctl create QorvexShots "$TYPE" "$RUNTIME")
           xcrun simctl boot "$UDID"
