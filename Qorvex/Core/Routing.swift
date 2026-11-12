@@ -128,6 +128,8 @@ final class Presenter {
     var viewer: ViewerItem?
     var video: VideoItem?
     var toast: String?
+    var verify = false
+    @ObservationIgnored var afterVerify: (() -> Void)?
     @ObservationIgnored private var toastTask: Task<Void, Never>?
 
     func show(_ message: String) {

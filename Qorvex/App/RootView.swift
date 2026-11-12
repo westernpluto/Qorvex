@@ -37,6 +37,13 @@ struct RootView: View {
             }
         }
         .sheet(item: $presenter.safari) { u in SafariView(url: u.url).ignoresSafeArea() }
+        .sheet(isPresented: $presenter.verify) {
+            RedditVerifyView {
+                let retry = presenter.afterVerify
+                presenter.afterVerify = nil
+                retry?()
+            }
+        }
         .fullScreenCover(item: $presenter.viewer) { v in MediaViewer(item: v) }
         .fullScreenCover(item: $presenter.video) { v in
             FullscreenPlayer(url: v.url)

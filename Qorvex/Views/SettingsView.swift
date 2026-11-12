@@ -112,6 +112,8 @@ struct SettingsView: View {
                 }
                 Picker("Cache Freshness", selection: $settings.cacheMode) { ForEach(CacheMode.allCases) { Text($0.label).tag($0) } }
                 Picker("Source", selection: $settings.source) { ForEach(ImageSource.allCases) { Text($0.label).tag($0) } }
+                Picker("Connection", selection: $settings.connection) { ForEach(ConnectionMode.allCases) { Text($0.label).tag($0) } }
+                Button { Presenter.shared.verify = true } label: { Label("Open Reddit to Verify", systemImage: "safari") }
                 LabeledContent("Cache", value: cacheInfo)
                 Button("Clear Cache", role: .destructive) {
                     Task {
@@ -122,7 +124,7 @@ struct SettingsView: View {
                     }
                 }
             } header: { Text("Network & Rate Limits") } footer: {
-                Text("Qorvex reads Reddit's public pages directly from your iPhone — no API key, no account, no server. It paces itself under Reddit's anonymous limit and serves repeat views from cache, so it never hammers Reddit. Keep the budget at 10 or below. If Reddit ever pushes back, Qorvex automatically slows down and shows cached content.")
+                Text("Connection: Automatic tries a direct request and switches to the built-in browser engine if Reddit filters it. If Reddit still blocks, use Open Reddit to Verify. Qorvex reads Reddit's public pages directly from your iPhone — no API key, no account, no server. It paces itself under Reddit's anonymous limit and serves repeat views from cache, so it never hammers Reddit. Keep the budget at 10 or below. If Reddit ever pushes back, Qorvex automatically slows down and shows cached content.")
             }
 
             Section {
@@ -184,6 +186,9 @@ struct NetworkStatsView: View {
                     stat("\(s.cacheHits)", "from cache")
                     Divider().frame(height: 28)
                     stat(s.waiting > 0 ? "\(s.waiting)" : "0", "queued")
+                }
+                if s.usingBrowserEngine {
+                    Label("Using browser engine", systemImage: "safari").font(.caption).foregroundStyle(.secondary)
                 }
                 if let e = s.lastError {
                     Label(e, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)

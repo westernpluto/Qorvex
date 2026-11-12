@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum RedditError: LocalizedError {
-    case offline, rateLimited, notFound, privateCommunity, banned, quarantined, blocked, http(Int), decoding
+    case offline, rateLimited, notFound, privateCommunity, banned, quarantined, blocked(Int), http(Int), decoding
 
     var errorDescription: String? {
         switch self {
@@ -12,7 +12,7 @@ enum RedditError: LocalizedError {
         case .privateCommunity: return "This community is private"
         case .banned: return "This community has been banned"
         case .quarantined: return "This community is quarantined"
-        case .blocked: return "Reddit refused this request"
+        case .blocked(let c): return c == 200 ? "Reddit sent a block page instead of data" : "Reddit blocked the request (HTTP \(c))"
         case .http(let c): return "Reddit returned an error (\(c))"
         case .decoding: return "Couldn't read Reddit's response"
         }
@@ -47,6 +47,8 @@ final class NetworkStatus {
     var cacheHits = 0
     var recent: [Date] = []
     var lastError: String?
+    var blocked = false
+    var usingBrowserEngine = false
     var backoffUntil: Date?
 
     var usedThisMinute: Int { recent.filter { Date().timeIntervalSince($0) < 60 }.count }
@@ -65,12 +67,16 @@ actor RedditClient {
     private var memoryOrder: [String] = []
     private let session: URLSession
     private let cacheDir: URL
+    private var preferBrowser = false
+    private var userAgent: String?
 
     init() {
         let cfg = URLSessionConfiguration.default
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         cfg.timeoutIntervalForRequest = 20
-        cfg.httpAdditionalHeaders = ["User-Agent": "ios:com.qorvex.reader:v1.0 (personal reader app)", "Accept": "application/json"]
+        cfg.httpAdditionalHeaders = ["Accept": "application/json", "Accept-Language": Locale.preferredLanguages.prefix(3).joined(separator: ", ")]
+        cfg.httpCookieStorage = .shared
+        cfg.httpShouldSetCookies = true
         cfg.waitsForConnectivity = false
         session = URLSession(configuration: cfg)
         cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("reddit", isDirectory: true)
@@ -162,23 +168,76 @@ actor RedditClient {
     // MARK: - Fetch
 
     private func download(_ path: String, host: String) async throws -> Data {
-        try await acquireSlot()
+        let mode = await MainActor.run { AppSettings.shared.connection }
         let sep = path.contains("?") ? "&" : "?"
         guard let url = URL(string: host + path + sep + "raw_json=1") else { throw RedditError.notFound }
+        let browserFirst = mode == .browser || (mode == .automatic && preferBrowser)
+        do {
+            try await acquireSlot()
+            let data = browserFirst ? try await viaBrowser(url) : try await viaDirect(url)
+            await setBlocked(false)
+            return data
+        } catch RedditError.blocked(let code) {
+            guard mode == .automatic else { await setBlocked(true); throw RedditError.blocked(code) }
+            // Direct request was filtered: switch to the browser engine for the rest of the session.
+            if !browserFirst {
+                preferBrowser = true
+                await MainActor.run { NetworkStatus.shared.usingBrowserEngine = true }
+                do {
+                    try await acquireSlot()
+                    let data = try await viaBrowser(url)
+                    await setBlocked(false)
+                    return data
+                } catch RedditError.blocked { }
+            }
+            // Last resort: the other Reddit host.
+            if let alt = URL(string: url.absoluteString.replacingOccurrences(of: host, with: host.contains("old.") ? "https://www.reddit.com" : "https://old.reddit.com")), alt != url {
+                do {
+                    try await acquireSlot()
+                    let data = try await viaBrowser(alt)
+                    await setBlocked(false)
+                    return data
+                } catch RedditError.blocked(let c) {
+                    await setBlocked(true)
+                    throw RedditError.blocked(c)
+                }
+            }
+            await setBlocked(true)
+            throw RedditError.blocked(code)
+        }
+    }
+
+    private func setBlocked(_ b: Bool) async {
+        await MainActor.run { if NetworkStatus.shared.blocked != b { NetworkStatus.shared.blocked = b } }
+    }
+
+    private func viaDirect(_ url: URL) async throws -> Data {
+        if userAgent == nil { userAgent = await MainActor.run { WebTransport.safariUserAgent } }
+        var req = URLRequest(url: url)
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         let data: Data, response: URLResponse
         do {
-            (data, response) = try await session.data(from: url)
+            (data, response) = try await session.data(for: req)
         } catch let e as URLError where [URLError.Code.notConnectedToInternet, URLError.Code.networkConnectionLost, URLError.Code.dataNotAllowed].contains(e.code) {
             throw RedditError.offline
         }
         guard let http = response as? HTTPURLResponse else { throw RedditError.http(0) }
-        switch http.statusCode {
+        return try await interpret(status: http.statusCode, contentType: http.value(forHTTPHeaderField: "Content-Type") ?? "",
+                                   retryAfter: http.value(forHTTPHeaderField: "Retry-After"), data: data)
+    }
+
+    private func viaBrowser(_ url: URL) async throws -> Data {
+        let r = try await WebTransport.shared.fetch(url)
+        return try await interpret(status: r.status, contentType: r.contentType, retryAfter: r.retryAfter, data: r.data)
+    }
+
+    private func interpret(status: Int, contentType: String, retryAfter: String?, data: Data) async throws -> Data {
+        switch status {
         case 200..<300:
-            let ct = http.value(forHTTPHeaderField: "Content-Type") ?? ""
-            if !ct.contains("json") { throw RedditError.blocked }
+            if !contentType.contains("json") { throw RedditError.blocked(status) }
             return data
         case 429:
-            let ra = Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 0
+            let ra = Double(retryAfter ?? "") ?? 0
             backoffUntil = Date().addingTimeInterval(max(ra, 20))
             let until = backoffUntil
             await MainActor.run {
@@ -193,10 +252,10 @@ actor RedditClient {
             case "private": throw RedditError.privateCommunity
             case "banned": throw RedditError.banned
             case "quarantined": throw RedditError.quarantined
-            default: throw http.statusCode == 404 ? RedditError.notFound : RedditError.blocked
+            default: throw status == 404 ? RedditError.notFound : RedditError.blocked(status)
             }
         default:
-            throw RedditError.http(http.statusCode)
+            throw RedditError.http(status)
         }
     }
 

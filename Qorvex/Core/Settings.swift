@@ -127,6 +127,18 @@ enum AutoplayMode: String, CaseIterable, Identifiable {
     var label: String { rawValue.capitalized }
 }
 
+enum ConnectionMode: String, CaseIterable, Identifiable {
+    case automatic, direct, browser
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .direct: return "Direct"
+        case .browser: return "Browser Engine"
+        }
+    }
+}
+
 enum ImageSource: String, CaseIterable, Identifiable {
     case www, old
     var id: String { rawValue }
@@ -165,6 +177,7 @@ final class AppSettings {
     var requestsPerMinute: Int { didSet { d.set(requestsPerMinute, forKey: "rpm") } }
     var cacheMode: CacheMode { didSet { d.set(cacheMode.rawValue, forKey: "cacheMode") } }
     var source: ImageSource { didSet { d.set(source.rawValue, forKey: "source") } }
+    var connection: ConnectionMode { didSet { d.set(connection.rawValue, forKey: "connection") } }
 
     private init() {
         func e<T: RawRepresentable>(_ k: String, _ def: T) -> T where T.RawValue == String {
@@ -196,12 +209,13 @@ final class AppSettings {
         requestsPerMinute = (UserDefaults.standard.object(forKey: "rpm") as? Int) ?? 9
         cacheMode = e("cacheMode", CacheMode.balanced)
         source = e("source", ImageSource.www)
+        connection = e("connection", ConnectionMode.automatic)
     }
 
     func reset() {
         for k in ["theme", "accent", "textSize", "layout", "twoPane", "homeSort", "commentSort", "nsfw", "blurSpoilers", "autoplay",
                   "startMuted", "dataSaver", "hideRead", "dimRead", "showFlair", "showThumbnails", "swipeActions", "nextCommentButton",
-                  "collapseAutomod", "haptics", "inAppBrowser", "readerMode", "rpm", "cacheMode", "source"] {
+                  "collapseAutomod", "haptics", "inAppBrowser", "readerMode", "rpm", "cacheMode", "source", "connection"] {
             d.removeObject(forKey: k)
         }
         let fresh = AppSettings()
@@ -211,7 +225,7 @@ final class AppSettings {
         dimRead = fresh.dimRead; showFlair = fresh.showFlair; showThumbnails = fresh.showThumbnails; swipeActions = fresh.swipeActions
         nextCommentButton = fresh.nextCommentButton; collapseAutomod = fresh.collapseAutomod; haptics = fresh.haptics
         inAppBrowser = fresh.inAppBrowser; readerMode = fresh.readerMode; requestsPerMinute = fresh.requestsPerMinute
-        cacheMode = fresh.cacheMode; source = fresh.source
+        cacheMode = fresh.cacheMode; source = fresh.source; connection = fresh.connection
     }
 }
 

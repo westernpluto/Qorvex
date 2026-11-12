@@ -50,12 +50,29 @@ struct EmptyState: View {
 struct ErrorState: View {
     let message: String
     let retry: () -> Void
+
     var body: some View {
+        let blocked = NetworkStatus.shared.blocked
         VStack(spacing: 14) {
-            EmptyState(icon: "exclamationmark.triangle", title: message, message: "Your cached and saved posts still work offline.")
-            Button("Try Again", action: retry)
+            EmptyState(icon: blocked ? "hand.raised" : "exclamationmark.triangle", title: message,
+                       message: blocked
+                        ? "Reddit is filtering this connection. Open Reddit once and complete any check it shows — Qorvex shares that browser session. Cached and saved posts still work."
+                        : "Your cached and saved posts still work offline.")
+            if blocked {
+                Button {
+                    Presenter.shared.afterVerify = retry
+                    Presenter.shared.verify = true
+                } label: { Label("Open Reddit to Verify", systemImage: "safari") }
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
+                Button("Try Again", action: retry)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+            } else {
+                Button("Try Again", action: retry)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+            }
         }
         .padding(.bottom, 24)
     }
