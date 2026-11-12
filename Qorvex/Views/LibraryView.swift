@@ -238,7 +238,7 @@ struct CommunitiesView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Communities")
-        .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Filter communities")
+        .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter communities")
     }
 
     private func feedRow(_ src: FeedSource, title: String, icon: String, color: Color) -> some View {

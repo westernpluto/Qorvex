@@ -98,7 +98,7 @@ struct SearchView: View {
         .background(Color.appBackground)
         .navigationTitle(sub.map { "Search r/\($0)" } ?? "Search")
         .navigationBarTitleDisplayMode(restrictTo == nil ? .large : .inline)
-        .searchable(text: $text, prompt: sub.map { "Search r/\($0)" } ?? "Posts, communities, people")
+        .searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: sub.map { "Search r/\($0)" } ?? "Posts, communities, people")
         .onSubmit(of: .search) { Task { await model.run(text, sub: sub) } }
         .onChange(of: model.scope) { _, _ in if !text.isEmpty && model.searched { Task { await model.run(text, sub: sub) } } }
         .onChange(of: text) { _, new in if new.isEmpty { model.searched = false } }
