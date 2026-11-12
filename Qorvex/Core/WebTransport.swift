@@ -45,6 +45,7 @@ final class WebTransport: NSObject, WKNavigationDelegate {
         let contentType: String
         let data: Data
         let retryAfter: String?
+        let finalURL: URL?
     }
 
     func fetch(_ url: URL) async throws -> Response {
@@ -63,22 +64,24 @@ final class WebTransport: NSObject, WKNavigationDelegate {
     }
 
     static func looksBlocked(_ r: Response) -> Bool {
-        r.status == 403 || (r.status == 200 && !r.contentType.contains("json"))
+        r.status == 403 || r.status == 404 || !r.contentType.contains("json")
+            || (r.finalURL.map { !$0.path.hasSuffix(".json") } ?? false)
     }
 
     private func run(_ url: URL) async throws -> Response {
         let js = """
         const r = await fetch(u, { credentials: 'include', headers: { 'Accept': 'application/json' } });
         const t = await r.text();
-        return [r.status, r.headers.get('content-type') || '', t, r.headers.get('retry-after') || ''];
+        return [r.status, r.headers.get('content-type') || '', t, r.headers.get('retry-after') || '', r.url || ''];
         """
         let result = try await webView.callAsyncJavaScript(js, arguments: ["u": url.absoluteString], in: nil, contentWorld: .defaultClient)
-        guard let arr = result as? [Any], arr.count == 4 else { throw RedditError.http(0) }
+        guard let arr = result as? [Any], arr.count == 5 else { throw RedditError.http(0) }
         let status = (arr[0] as? NSNumber)?.intValue ?? 0
         let ct = arr[1] as? String ?? ""
         let body = arr[2] as? String ?? ""
         let ra = arr[3] as? String
-        return Response(status: status, contentType: ct, data: Data(body.utf8), retryAfter: ra?.isEmpty == false ? ra : nil)
+        let final = (arr[4] as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        return Response(status: status, contentType: ct, data: Data(body.utf8), retryAfter: ra?.isEmpty == false ? ra : nil, finalURL: final)
     }
 
     private func prime(_ origin: String, full: Bool) async throws {

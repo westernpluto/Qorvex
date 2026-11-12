@@ -114,6 +114,7 @@ struct SettingsView: View {
                 Picker("Source", selection: $settings.source) { ForEach(ImageSource.allCases) { Text($0.label).tag($0) } }
                 Picker("Connection", selection: $settings.connection) { ForEach(ConnectionMode.allCases) { Text($0.label).tag($0) } }
                 Button { Presenter.shared.verify = true } label: { Label("Open Reddit to Verify", systemImage: "safari") }
+                NavigationLink { ConnectionLogView() } label: { Label("Connection Log", systemImage: "list.bullet.rectangle") }
                 LabeledContent("Cache", value: cacheInfo)
                 Button("Clear Cache", role: .destructive) {
                     Task {
@@ -239,5 +240,44 @@ struct FilterEditor: View {
         guard !v.isEmpty, !items.contains(v) else { return }
         items.append(v)
         new = ""
+    }
+}
+
+struct ConnectionLogView: View {
+    var body: some View {
+        let status = NetworkStatus.shared
+        List {
+            if status.log.isEmpty {
+                Text("No requests yet. Open a feed, then come back.").foregroundStyle(.secondary)
+            }
+            ForEach(status.log) { e in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("\(e.status)")
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle((200..<300).contains(e.status) ? Color.green : Color.orange)
+                        Text(e.via).font(.caption.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.15), in: Capsule())
+                        Spacer()
+                        Text(e.date.formatted(date: .omitted, time: .standard)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(e.url).font(.caption.monospaced()).lineLimit(3)
+                    if !e.contentType.isEmpty { Text(e.contentType).font(.caption2).foregroundStyle(.secondary) }
+                    if let l = e.location { Text("→ \(l)").font(.caption.monospaced()).foregroundStyle(.orange).lineLimit(3) }
+                    if !e.snippet.isEmpty { Text(e.snippet).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(4) }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .navigationTitle("Connection Log")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    UIPasteboard.general.string = status.logText
+                    Presenter.shared.show("Log copied")
+                } label: { Label("Copy", systemImage: "doc.on.doc") }
+                .disabled(status.log.isEmpty)
+            }
+        }
     }
 }

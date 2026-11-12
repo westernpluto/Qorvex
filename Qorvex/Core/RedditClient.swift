@@ -12,7 +12,10 @@ enum RedditError: LocalizedError {
         case .privateCommunity: return "This community is private"
         case .banned: return "This community has been banned"
         case .quarantined: return "This community is quarantined"
-        case .blocked(let c): return c == 200 ? "Reddit sent a block page instead of data" : "Reddit blocked the request (HTTP \(c))"
+        case .blocked(let c):
+            if c == 200 { return "Reddit sent a web page instead of data" }
+            if (300..<400).contains(c) { return "Reddit redirected the request away (HTTP \(c))" }
+            return "Reddit blocked the request (HTTP \(c))"
         case .http(let c): return "Reddit returned an error (\(c))"
         case .decoding: return "Couldn't read Reddit's response"
         }
@@ -51,7 +54,42 @@ final class NetworkStatus {
     var usingBrowserEngine = false
     var backoffUntil: Date?
 
+    var log: [RequestLog] = []
+
     var usedThisMinute: Int { recent.filter { Date().timeIntervalSince($0) < 60 }.count }
+
+    func record(_ entry: RequestLog) {
+        log.insert(entry, at: 0)
+        if log.count > 25 { log.removeLast() }
+    }
+
+    var logText: String {
+        log.map { e in
+            var line = "\(e.date.formatted(date: .omitted, time: .standard)) [\(e.via)] \(e.status) \(e.contentType)\n  \(e.url)"
+            if let l = e.location { line += "\n  → \(l)" }
+            if !e.snippet.isEmpty { line += "\n  \(e.snippet)" }
+            return line
+        }.joined(separator: "\n\n")
+    }
+}
+
+struct RequestLog: Identifiable {
+    let id = UUID()
+    let date = Date()
+    let via: String
+    let url: String
+    let status: Int
+    let contentType: String
+    let location: String?
+    let snippet: String
+}
+
+/// Stops URLSession from silently following redirects so we can see where Reddit sends us.
+final class RedirectCatcher: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
 }
 
 /// Reads Reddit's public JSON pages straight from the phone — no API key, no OAuth, no server.
@@ -211,23 +249,57 @@ actor RedditClient {
         await MainActor.run { if NetworkStatus.shared.blocked != b { NetworkStatus.shared.blocked = b } }
     }
 
-    private func viaDirect(_ url: URL) async throws -> Data {
+    private let redirectCatcher = RedirectCatcher()
+
+    private func log(_ via: String, _ url: URL, _ status: Int, _ ct: String, _ location: String?, _ data: Data) async {
+        let snippet = String(decoding: data.prefix(160), as: UTF8.self)
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        let entry = RequestLog(via: via, url: url.absoluteString, status: status, contentType: ct, location: location,
+                               snippet: ct.contains("json") && (200..<300).contains(status) ? "" : snippet)
+        await MainActor.run { NetworkStatus.shared.record(entry) }
+    }
+
+    private static func isJSONResource(_ u: URL) -> Bool {
+        guard let host = u.host?.lowercased(), host == "reddit.com" || host.hasSuffix(".reddit.com") else { return false }
+        return u.path.hasSuffix(".json")
+    }
+
+    private func viaDirect(_ start: URL) async throws -> Data {
         if userAgent == nil { userAgent = await MainActor.run { WebTransport.safariUserAgent } }
-        var req = URLRequest(url: url)
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        let data: Data, response: URLResponse
-        do {
-            (data, response) = try await session.data(for: req)
-        } catch let e as URLError where [URLError.Code.notConnectedToInternet, URLError.Code.networkConnectionLost, URLError.Code.dataNotAllowed].contains(e.code) {
-            throw RedditError.offline
+        var url = start
+        for _ in 0..<3 {
+            var req = URLRequest(url: url)
+            req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            let data: Data, response: URLResponse
+            do {
+                (data, response) = try await session.data(for: req, delegate: redirectCatcher)
+            } catch let e as URLError where [URLError.Code.notConnectedToInternet, URLError.Code.networkConnectionLost, URLError.Code.dataNotAllowed].contains(e.code) {
+                throw RedditError.offline
+            }
+            guard let http = response as? HTTPURLResponse else { throw RedditError.http(0) }
+            let ct = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            let location = http.value(forHTTPHeaderField: "Location")
+            await log("direct", url, http.statusCode, ct, location, data)
+            if (300..<400).contains(http.statusCode) {
+                // Follow only if Reddit points at the same JSON resource (e.g. another host);
+                // anything else (login, interstitial, HTML page) means the request was filtered.
+                if let location, let next = URL(string: location, relativeTo: url)?.absoluteURL, Self.isJSONResource(next) {
+                    url = next
+                    continue
+                }
+                throw RedditError.blocked(http.statusCode)
+            }
+            return try await interpret(status: http.statusCode, contentType: ct, retryAfter: http.value(forHTTPHeaderField: "Retry-After"), data: data)
         }
-        guard let http = response as? HTTPURLResponse else { throw RedditError.http(0) }
-        return try await interpret(status: http.statusCode, contentType: http.value(forHTTPHeaderField: "Content-Type") ?? "",
-                                   retryAfter: http.value(forHTTPHeaderField: "Retry-After"), data: data)
+        throw RedditError.blocked(310)
     }
 
     private func viaBrowser(_ url: URL) async throws -> Data {
         let r = try await WebTransport.shared.fetch(url)
+        let redirectedAway = r.finalURL.map { !Self.isJSONResource($0) } ?? false
+        await log("browser", url, r.status, r.contentType, redirectedAway ? r.finalURL?.absoluteString : nil, r.data)
+        if redirectedAway { throw RedditError.blocked(r.status == 200 ? 302 : r.status) }
         return try await interpret(status: r.status, contentType: r.contentType, retryAfter: r.retryAfter, data: r.data)
     }
 
@@ -252,7 +324,11 @@ actor RedditClient {
             case "private": throw RedditError.privateCommunity
             case "banned": throw RedditError.banned
             case "quarantined": throw RedditError.quarantined
-            default: throw status == 404 ? RedditError.notFound : RedditError.blocked(status)
+            default:
+                // A genuine missing subreddit/user comes back as Reddit JSON. An HTML 404 means the
+                // request itself was filtered or rerouted, so let the fallbacks try.
+                if status == 404 && contentType.contains("json") { throw RedditError.notFound }
+                throw RedditError.blocked(status)
             }
         default:
             throw RedditError.http(status)
