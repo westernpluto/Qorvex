@@ -123,6 +123,11 @@ struct AdaptiveStack<Root: View>: View {
                     .handlesLinks(detailRouter)
                 }
                 .navigationSplitViewStyle(.balanced)
+                // Screens pushed from the sidebar can be hosted in the detail column, outside
+                // either NavigationStack's environment. Provide a Router at the split-view level
+                // too so @Environment(Router.self) can never come up empty (that's a hard crash).
+                .environment(listRouter)
+                .handlesLinks(listRouter)
             } else {
                 NavigationStack(path: $listRouter.path) {
                     root()
