@@ -10,19 +10,17 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode (27 if available, else newest)
+      - name: Select Xcode 27
         run: |
           echo "Installed Xcodes:"; ls -d /Applications/Xcode*.app
           XC="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)"
-          if [ -z "$XC" ]; then
-            XC="$(ls -d /Applications/Xcode_[0-9]*.app | sort -V | tail -1)"
-            echo "::warning::Xcode 27 is not on this runner image yet; using $(basename "$XC")"
-          fi
+          [ -z "$XC" ] && [ -d /Applications/Xcode.app ] && /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -version | grep -q "Xcode 27" && XC=/Applications/Xcode.app
+          if [ -z "$XC" ]; then echo "::error::Xcode 27 not found on this runner"; exit 1; fi
           sudo xcode-select -s "$XC"
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos

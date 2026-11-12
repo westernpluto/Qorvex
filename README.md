@@ -59,7 +59,7 @@ Qorvex follows Apple's [Preparing your app for iPhone Duo](https://developer.app
 - **Vertical-bar ready.** Every toolbar item has both an icon and a title, which items need in order to appear in vertical bars.
 - **Container-relative sizing.** No fixed iPhone dimensions, no `UIDevice` idiom or orientation checks. Media scales to its container's width.
 
-> **Build with Xcode 27** to use the Duo's full screen. Apple notes that apps built with Xcode 26 or earlier don't extend under the status bar and camera. CI uses Xcode 27 automatically once GitHub's macOS runner image includes it. Until then it builds with the newest Xcode 26, which runs on the Duo but letterboxed in that area.
+> **Built with Xcode 27** so the app uses the Duo's full screen. Apple notes that apps built with Xcode 26 or earlier don't extend under the status bar and camera. CI runs on GitHub's `xcode-27` runner image.
 
 ## Installing it for free
 
