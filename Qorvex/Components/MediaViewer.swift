@@ -16,9 +16,11 @@ struct MediaViewer: View {
 
     private var current: GalleryEntry { item.entries[min(index, item.entries.count - 1)] }
 
+    private var dragProgress: Double { Double(abs(drag.height)) }
+
     var body: some View {
         ZStack {
-            Color.black.opacity(1 - min(0.7, abs(drag.height) / 500)).ignoresSafeArea()
+            Color.black.opacity(1.0 - min(0.7, dragProgress / 500.0)).ignoresSafeArea()
             TabView(selection: $index) {
                 ForEach(Array(item.entries.enumerated()), id: \.offset) { i, entry in
                     ViewerPage(entry: entry, zoomed: $zoomed)
@@ -27,7 +29,7 @@ struct MediaViewer: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .offset(y: drag.height)
-            .scaleEffect(1 - min(0.15, abs(drag.height) / 2000))
+            .scaleEffect(CGFloat(1.0 - min(0.15, dragProgress / 2000.0)))
             .simultaneousGesture(
                 DragGesture(minimumDistance: 18)
                     .onChanged { v in

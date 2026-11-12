@@ -69,6 +69,11 @@ struct FeedView: View {
 
     private var isRoot: Bool { source == .home || source == .popular }
 
+    private var filterCount: Int {
+        let f = library.filters
+        return f.subreddits.count + f.users.count + f.domains.count + f.keywords.count
+    }
+
     var body: some View {
         List {
             if let sub = source.subredditName {
@@ -85,42 +90,7 @@ struct FeedView: View {
                 StaleBanner(text: note).plainRow()
             }
             ForEach(model.posts) { post in
-                PostRow(post: post, showSubreddit: source.subredditName == nil)
-                    .padding(.horizontal, settings.layout == .card ? 12 : 0)
-                    .padding(.vertical, settings.layout == .card ? 5 : 0)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(settings.layout == .compact ? .visible : .hidden)
-                    .listRowBackground(settings.layout == .compact ? Color.cardBackground : Color.clear)
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        if settings.swipeActions {
-                            Button {
-                                let on = library.toggleSave(post)
-                                Haptics.success()
-                                Presenter.shared.show(on ? "Saved" : "Unsaved")
-                            } label: { Label(library.isSaved(post.id) ? "Unsave" : "Save", systemImage: "bookmark.fill") }
-                            .tint(.accentColor)
-                        }
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        if settings.swipeActions {
-                            Button {
-                                library.hide(post.id)
-                                withAnimation { model.remove(post.id) }
-                                Haptics.tap(.medium)
-                            } label: { Label("Hide", systemImage: "eye.slash.fill") }
-                            .tint(.gray)
-                            ShareLink(item: post.webURL) { Label("Share", systemImage: "square.and.arrow.up") }
-                                .tint(.blue)
-                        }
-                    }
-                    .contextMenu {
-                        PostMenuItems(post: post, router: router)
-                    }
-                    .onAppear {
-                        if post.id == model.posts.dropLast(6).last?.id || post.id == model.posts.last?.id {
-                            Task { await model.load() }
-                        }
-                    }
+                FeedRow(post: post, showSubreddit: source.subredditName == nil, model: model)
             }
             footer.plainRow()
         }
@@ -133,7 +103,7 @@ struct FeedView: View {
         .refreshable { await model.load(reset: true, force: true) }
         .task { if model.posts.isEmpty && !model.loading { await model.load(reset: true) } }
         .onChange(of: library.subs) { _, _ in if source == .home { Task { await model.load(reset: true) } } }
-        .onChange(of: library.filters.subreddits.count + library.filters.users.count + library.filters.domains.count + library.filters.keywords.count) { _, _ in
+        .onChange(of: filterCount) { _, _ in
             model.posts.removeAll { !library.shouldShow($0) }
         }
         .onChange(of: library.hidden.count) { _, _ in model.posts.removeAll { library.hidden.contains($0.id) } }
@@ -222,5 +192,68 @@ extension View {
         listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
+    }
+}
+
+/// One post in a feed list, with swipe actions, context menu and infinite-scroll trigger.
+private struct FeedRow: View {
+    let post: Post
+    let showSubreddit: Bool
+    let model: FeedModel
+    @Environment(Router.self) private var router
+    private var settings: AppSettings { .shared }
+    private var library: Library { .shared }
+
+    var body: some View {
+        let isCard = settings.layout == .card
+        let rowBackground: Color = isCard ? Color.clear : Color.cardBackground
+        PostRow(post: post, showSubreddit: showSubreddit)
+            .padding(.horizontal, isCard ? 12 : 0)
+            .padding(.vertical, isCard ? 5 : 0)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(isCard ? .hidden : .visible)
+            .listRowBackground(rowBackground)
+            .swipeActions(edge: .leading, allowsFullSwipe: true) { leadingActions }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) { trailingActions }
+            .contextMenu { PostMenuItems(post: post, router: router) }
+            .onAppear(perform: loadMoreIfNeeded)
+    }
+
+    @ViewBuilder private var leadingActions: some View {
+        if settings.swipeActions {
+            Button(action: save) {
+                Label(library.isSaved(post.id) ? "Unsave" : "Save", systemImage: "bookmark.fill")
+            }
+            .tint(.accentColor)
+        }
+    }
+
+    @ViewBuilder private var trailingActions: some View {
+        if settings.swipeActions {
+            Button(action: hide) { Label("Hide", systemImage: "eye.slash.fill") }
+                .tint(.gray)
+            ShareLink(item: post.webURL) { Label("Share", systemImage: "square.and.arrow.up") }
+                .tint(.blue)
+        }
+    }
+
+    private func save() {
+        let on = library.toggleSave(post)
+        Haptics.success()
+        Presenter.shared.show(on ? "Saved" : "Unsaved")
+    }
+
+    private func hide() {
+        library.hide(post.id)
+        withAnimation { model.remove(post.id) }
+        Haptics.tap(.medium)
+    }
+
+    private func loadMoreIfNeeded() {
+        let posts = model.posts
+        let trigger = posts.count > 6 ? posts[posts.count - 7].id : posts.last?.id
+        if post.id == trigger || post.id == posts.last?.id {
+            Task { await model.load() }
+        }
     }
 }

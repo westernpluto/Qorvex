@@ -15,11 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode 27
+      - name: Select Xcode (27 if available, else newest)
         run: |
           echo "Installed Xcodes:"; ls -d /Applications/Xcode*.app
           XC="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)"
-          if [ -z "$XC" ]; then echo "::error::Xcode 27 is not installed on this runner image"; exit 1; fi
+          if [ -z "$XC" ]; then
+            XC="$(ls -d /Applications/Xcode_[0-9]*.app | sort -V | tail -1)"
+            echo "::warning::Xcode 27 is not on this runner image yet; using $(basename "$XC")"
+          fi
           sudo xcode-select -s "$XC"
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos
@@ -36,7 +39,7 @@ jobs:
 
       - name: Show errors
         if: failure()
-        run: grep -E "error:" build.log | sort -u | head -80
+        run: grep -E "error:" build.log | sort -u | head -80 || true
 
       - name: Package unsigned IPA
         run: |
