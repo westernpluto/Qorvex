@@ -50,6 +50,17 @@ Normal reading uses about one request per screen you open (a feed page, a post's
 - Filters by keyword, community, user and domain
 - Export and import a JSON backup
 
+## iPhone Duo
+
+Qorvex follows Apple's [Preparing your app for iPhone Duo](https://developer.apple.com/documentation/technologyoverviews/preparing-your-app-for-iphone-duo) guidance:
+
+- **One layout across every posture.** A single `NavigationSplitView` shows the feed and the post side by side on the inner display. It collapses into a single stack on the outer display, so folding or unfolding keeps the post you're reading.
+- **System containers only.** Tab bar, split view, navigation stacks and sheets, so the system can move bars to the side of the display and keep content clear of the fold and cameras.
+- **Vertical-bar ready.** Every toolbar item has both an icon and a title, which items need in order to appear in vertical bars.
+- **Container-relative sizing.** No fixed iPhone dimensions, no `UIDevice` idiom or orientation checks. Media scales to its container's width.
+
+> **Build with Xcode 27** to use the Duo's full screen. Apple notes that apps built with Xcode 26 or earlier don't extend under the status bar and camera. CI uses Xcode 27 automatically once GitHub's macOS runner image includes it. Until then it builds with the newest Xcode 26, which runs on the Duo but letterboxed in that area.
+
 ## Installing it for free
 
 You need a signed build to run any iOS app. Without a paid Apple Developer account, there are two free routes:

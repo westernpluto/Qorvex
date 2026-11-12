@@ -71,7 +71,7 @@ struct UserView: View {
                     Button(role: .destructive) { library.filters.users.append(name); Presenter.shared.show("u/\(name) filtered") } label: {
                         Label("Filter This User", systemImage: "nosign")
                     }
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Label("More", systemImage: "ellipsis.circle") }
             }
         }
         .refreshable { await load(reset: true, force: true) }

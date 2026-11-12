@@ -148,7 +148,7 @@ struct FeedView: View {
                     }
                 }
             } label: {
-                Image(systemName: model.sort.icon)
+                Label("Sort: \(model.sort.label)", systemImage: model.sort.icon)
             }
             Menu {
                 if let sub = source.subredditName {
@@ -181,7 +181,7 @@ struct FeedView: View {
                 }
                 Button { Task { await model.load(reset: true, force: true) } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Label("More", systemImage: "ellipsis.circle")
             }
         }
     }

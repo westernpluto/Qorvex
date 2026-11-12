@@ -98,7 +98,7 @@ struct SearchView: View {
                         Picker("Time", selection: Binding(get: { model.time }, set: { model.time = $0; Task { await model.run(text, sub: sub) } })) {
                             ForEach(TimeRange.allCases) { Text($0.label).tag($0) }
                         }
-                    } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
+                    } label: { Label("Sort & Filter", systemImage: "line.3.horizontal.decrease.circle") }
                 }
             }
         }

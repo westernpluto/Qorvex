@@ -244,7 +244,7 @@ struct PostDetailView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if let post = model.post {
-                    Menu { PostMenuItems(post: post, router: router) } label: { Image(systemName: "ellipsis.circle") }
+                    Menu { PostMenuItems(post: post, router: router) } label: { Label("More", systemImage: "ellipsis.circle") }
                 }
             }
         }

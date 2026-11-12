@@ -63,7 +63,7 @@ struct LibraryView: View {
         .navigationTitle("Library")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { addingSub = true } label: { Image(systemName: "plus.circle") }
+                Button { addingSub = true } label: { Label("Join Community", systemImage: "plus.circle") }
             }
         }
         .alert("Join a Community", isPresented: $addingSub) {
@@ -198,7 +198,7 @@ struct HistoryView: View {
         .navigationTitle("History")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Clear", role: .destructive) { confirm = true }.disabled(library.history.isEmpty)
+                Button(role: .destructive) { confirm = true } label: { Label("Clear History", systemImage: "trash") }.disabled(library.history.isEmpty)
             }
         }
         .confirmationDialog("Clear reading history?", isPresented: $confirm, titleVisibility: .visible) {

@@ -76,62 +76,66 @@ private struct PacingOverlay: View {
     }
 }
 
-/// A navigation stack that becomes a two-column split (feed | post) on wide screens —
-/// an unfolded phone, landscape on large iPhones, or iPad.
+/// Feed and post side by side. One NavigationSplitView is used in every posture so that folding
+/// or unfolding (iPhone Duo), rotating, or resizing never resets where you are: SwiftUI collapses
+/// it into a single stack when the space is compact and expands it again when there's room.
 struct AdaptiveStack<Root: View>: View {
     @ViewBuilder let root: () -> Root
     @State private var listRouter = Router()
     @State private var detailRouter = Router()
     @State private var columns: NavigationSplitViewVisibility = .all
+    @Environment(\.horizontalSizeClass) private var sizeClass
     private var settings: AppSettings { .shared }
 
     var body: some View {
-        GeometryReader { geo in
-            let split = settings.twoPane && geo.size.width >= 680
-            Group {
-                if split {
-                    NavigationSplitView(columnVisibility: $columns) {
-                        NavigationStack(path: $listRouter.path) {
-                            root()
-                                .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
-                        }
-                        .environment(listRouter)
-                        .handlesLinks(listRouter)
-                        .navigationSplitViewColumnWidth(min: 320, ideal: geo.size.width * 0.44, max: 520)
-                    } detail: {
-                        NavigationStack(path: $detailRouter.path) {
-                            Group {
-                                if let ref = detailRouter.detailRoot {
-                                    PostDetailView(ref: ref).id(ref)
-                                } else {
-                                    EmptyState(icon: "text.bubble", title: "Select a post", message: "Posts open here while your feed stays put.")
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                        .background(Color.appBackground)
-                                }
-                            }
-                            .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
-                        }
-                        .environment(detailRouter)
-                        .handlesLinks(detailRouter)
-                    }
-                    .navigationSplitViewStyle(.balanced)
-                } else {
+        Group {
+            if settings.twoPane {
+                NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $listRouter.compactColumn) {
                     NavigationStack(path: $listRouter.path) {
                         root()
                             .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
                     }
                     .environment(listRouter)
                     .handlesLinks(listRouter)
+                    .navigationSplitViewColumnWidth(min: 320, ideal: 420, max: 560)
+                } detail: {
+                    NavigationStack(path: $detailRouter.path) {
+                        Group {
+                            if let ref = detailRouter.detailRoot {
+                                PostDetailView(ref: ref).id(ref)
+                            } else {
+                                EmptyState(icon: "text.bubble", title: "Select a post", message: "Posts open here while your feed stays put.")
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .background(Color.appBackground)
+                            }
+                        }
+                        .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
+                    }
+                    .environment(detailRouter)
+                    .handlesLinks(detailRouter)
                 }
+                .navigationSplitViewStyle(.balanced)
+            } else {
+                NavigationStack(path: $listRouter.path) {
+                    root()
+                        .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
+                }
+                .environment(listRouter)
+                .handlesLinks(listRouter)
             }
-            .onAppear { configure(split) }
-            .onChange(of: split) { _, s in configure(s) }
+        }
+        .onAppear(perform: configure)
+        .onChange(of: settings.twoPane) { _, _ in configure() }
+        .onChange(of: listRouter.compactColumn) { _, col in
+            // Backing out of a post on the narrow display returns to the feed; clear the selection
+            // so the wide layout doesn't show a stale post later.
+            if col == .sidebar && sizeClass == .compact { detailRouter.detailRoot = nil }
         }
     }
 
-    private func configure(_ split: Bool) {
+    private func configure() {
         listRouter.detail = detailRouter
-        listRouter.splitActive = split
+        listRouter.splitActive = settings.twoPane
         detailRouter.splitActive = false
     }
 }

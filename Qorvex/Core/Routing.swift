@@ -79,11 +79,14 @@ enum Route: Hashable {
     }
 }
 
-/// Per-navigation-stack router. In two-pane mode the list router forwards post opens to the detail column.
+/// Per-navigation-stack router. With two-pane on, the list router forwards post opens to the
+/// detail column of a NavigationSplitView. The split view collapses to a single stack on narrow
+/// screens (e.g. iPhone Duo's outer display) and expands when unfolded, keeping the open post.
 @Observable
 final class Router {
     var path = NavigationPath()
     var detailRoot: PostRef?
+    var compactColumn: NavigationSplitViewColumn = .sidebar
     @ObservationIgnored weak var detail: Router?
     @ObservationIgnored var splitActive = false
 
@@ -91,17 +94,17 @@ final class Router {
 
     func open(_ post: Post) {
         Library.shared.markRead(post)
-        let ref = PostRef(id: post.id, preview: post)
-        if splitActive, let d = detail {
-            d.path = NavigationPath()
-            d.detailRoot = ref
-        } else {
-            path.append(Route.post(ref))
-        }
+        open(PostRef(id: post.id, preview: post))
     }
 
     func open(_ ref: PostRef) {
-        if splitActive, let d = detail { d.path = NavigationPath(); d.detailRoot = ref } else { path.append(Route.post(ref)) }
+        if splitActive, let d = detail {
+            d.path = NavigationPath()
+            d.detailRoot = ref
+            compactColumn = .detail
+        } else {
+            path.append(Route.post(ref))
+        }
     }
 }
 
