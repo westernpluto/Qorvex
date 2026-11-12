@@ -94,8 +94,11 @@ jobs:
             xcrun simctl terminate "$UDID" com.qorvex.reader 2>/dev/null || true
             xcrun simctl launch "$UDID" com.qorvex.reader "$@"
             sleep 8
-            xcrun simctl io "$UDID" screenshot "shots/$NAME.png"
+            # The Duo has two displays: 3 = inner (unfolded), 1 = outer (folded).
+            xcrun simctl io "$UDID" screenshot --display=3 "shots/$NAME-inner.png" || true
+            xcrun simctl io "$UDID" screenshot --display=1 "shots/$NAME-outer.png" || true
           }
+          xcrun simctl help io > shots/simctl-io-help.txt 2>&1 || true
           NAME=home shoot -QXTab home
           NAME=post shoot -QXTab home -QXOpenSample
           NAME=search shoot -QXTab search
