@@ -194,7 +194,7 @@ final class AppSettings {
     var sessionCooldownUntil = Date.distantPast
 
     /// Key-free web session route: your reddit.com login used against oauth.reddit.com.
-    var sessionRouteActive: Bool { connection != .api && connection != .direct && webSessionSignedIn && Date() >= sessionCooldownUntil }
+    var sessionRouteActive: Bool { connection != .api && webSessionSignedIn && Date() >= sessionCooldownUntil }
 
     /// Full Reddit features available (own API key, or a working web session).
     var fullAccess: Bool { apiActive || sessionRouteActive }

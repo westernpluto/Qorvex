@@ -270,7 +270,7 @@ struct FeedView: View {
                     }
                 } else {
                     Button { } label: { Label("Hot", systemImage: "checkmark") }
-                    Section("Other sorts need Reddit API mode (Settings)") {
+                    Section("Other sorts need signing in to Reddit or an API key (Settings)") {
                         ForEach(SortOrder.allCases.filter { $0 != .hot }) { s in
                             Button { } label: { Label(s.label, systemImage: s.icon) }.disabled(true)
                         }

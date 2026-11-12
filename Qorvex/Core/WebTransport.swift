@@ -215,8 +215,13 @@ enum RedditAccount {
     }
 
     /// Ask Reddit who we are (cookies alone are unreliable: signed-out sessions get them too).
-    static func refresh() async {
+    private static var lastCheck = Date.distantPast
+
+    static func refresh(force: Bool = false) async {
         guard await isSignedIn() else { set(false, name: nil); return }
+        // Re-verify with Reddit at most every 10 minutes unless forced (e.g. right after signing in).
+        if !force && NetworkStatus.shared.signedIn && Date().timeIntervalSince(lastCheck) < 600 { return }
+        lastCheck = Date()
         let result = await RedditClient.shared.whoAmI()
         switch result {
         case .signedIn(let name): set(true, name: name)
@@ -275,7 +280,7 @@ struct RedditVerifyView: View {
         guard !finished else { return }
         finished = true
         WebTransport.shared.reset()
-        await RedditAccount.refresh()
+        await RedditAccount.refresh(force: true)
         NetworkStatus.shared.blocked = false
         NetworkStatus.shared.loginRequired = false
         await RedditClient.shared.clearLoginWall()
