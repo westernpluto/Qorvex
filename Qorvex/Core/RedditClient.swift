@@ -433,6 +433,29 @@ actor RedditClient {
 
     enum WhoAmI { case signedIn(String), signedOut, unknown }
 
+    /// www.reddit.com/api/user_data_by_account_ids.json with the web session; cached like other pages.
+    func userDataDirect(ids: [String]) async throws -> [String: UserDataInfo] {
+        let path = "/api/user_data_by_account_ids.json?ids=" + ids.joined(separator: ",")
+        if let hit = cached(path), Date().timeIntervalSince(hit.date) < 86400,
+           let v = try? JSONDecoder().decode([String: UserDataInfo].self, from: hit.data) { return v }
+        let cookie = await RedditAccount.cookieHeader()
+        if userAgent == nil { userAgent = await MainActor.run { WebTransport.safariUserAgent } }
+        guard let url = URL(string: "https://www.reddit.com" + path + "&raw_json=1") else { return [:] }
+        try await acquireSlot()
+        var req = URLRequest(url: url)
+        req.httpShouldHandleCookies = false
+        if !cookie.isEmpty { req.setValue(cookie, forHTTPHeaderField: "Cookie") }
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: req, delegate: redirectCatcher)
+        let http = response as? HTTPURLResponse
+        let ct = http?.value(forHTTPHeaderField: "Content-Type") ?? ""
+        await log("avatars", url, http?.statusCode ?? 0, ct, http?.value(forHTTPHeaderField: "Location"), data)
+        guard http?.statusCode == 200, ct.contains("json") else { throw RedditError.http(http?.statusCode ?? 0) }
+        let v = (try? JSONDecoder().decode([String: UserDataInfo].self, from: data)) ?? [:]
+        store(path, data)
+        return v
+    }
+
     /// Save or unsave a post/comment on the user's Reddit account.
     func save(_ fullname: String, save: Bool) async throws {
         try await postForm(save ? "/api/save" : "/api/unsave", body: "id=\(fullname)")
@@ -653,7 +676,7 @@ enum Reddit {
             page = base.isEmpty ? "/" : base
         }
         let t: String? = api && sort.needsTime ? time.rawValue : nil
-        return try await RedditClient.shared.get(page + ".json" + q(["limit": api ? "25" : nil, "t": t, "after": after, "sr_detail": api ? "1" : nil]), as: ListingResponse.self, force: force)
+        return try await RedditClient.shared.get(page + ".json" + q(["limit": api ? "50" : nil, "t": t, "after": after, "sr_detail": api ? "1" : nil]), as: ListingResponse.self, force: force)
     }
 
     /// A post's own page + `.json` (e.g. `/r/pics/comments/abc/title/.json`), as Safari would load it.
@@ -715,9 +738,9 @@ enum Reddit {
         return out
     }
 
-    /// Profile info for up to 100 accounts in one request.
+    /// Profile pictures for up to 100 accounts in one request (www, as the website does).
     static func userData(ids: [String]) async throws -> [String: UserDataInfo] {
-        try await RedditClient.shared.get("/api/user_data_by_account_ids.json" + q(["ids": ids.joined(separator: ",")]), as: [String: UserDataInfo].self, kind: .about).value
+        try await RedditClient.shared.userDataDirect(ids: ids)
     }
 
     static func userSaved(_ name: String, after: String?, force: Bool = false) async throws -> Fetched<ListingResponse> {

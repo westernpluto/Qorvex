@@ -115,16 +115,21 @@ final class CommentsModel {
             nodes = built.0
             collapsed = built.1
             // One batched request for everyone's profile picture in this thread.
-            var pairs: [(fullname: String, name: String)] = []
-            if let p = post, let f = p.author_fullname { pairs.append((f, p.author)) }
-            for n in built.0 { if case .comment(let c, _) = n.kind, let f = c.author_fullname { pairs.append((f, c.author)) } }
-            Task { await AvatarStore.shared.ensure(pairs) }
+            requestAvatars(for: built.0)
             staleNote = r.stale ? "\(r.error?.localizedDescription ?? "Offline") · cached" : nil
             loaded = true
         } catch {
             self.error = error.localizedDescription
         }
         loading = false
+    }
+
+    @MainActor
+    func requestAvatars(for list: [CommentNode]) {
+        var pairs: [(fullname: String, name: String)] = []
+        if let p = post, let f = p.author_fullname { pairs.append((f, p.author)) }
+        for n in list { if case .comment(let c, _) = n.kind, let f = c.author_fullname, c.author != "[deleted]" { pairs.append((f, c.author)) } }
+        Task { await AvatarStore.shared.ensure(pairs) }
     }
 
     @MainActor
@@ -176,6 +181,7 @@ final class CommentsModel {
             // Never remove the button unless real replies came back.
             guard gotComments, let idx = nodes.firstIndex(where: { $0.id == node.id }) else { return false }
             nodes.replaceSubrange(idx...idx, with: fresh)
+            requestAvatars(for: fresh)
             return true
         } catch {
             Presenter.shared.show(error.localizedDescription)
@@ -216,6 +222,7 @@ extension CommentsModel {
             let gotComments = fresh.contains { if case .comment = $0.kind { return true } else { return false } }
             guard gotComments, let idx = nodes.firstIndex(where: { $0.id == node.id }) else { return false }
             nodes.replaceSubrange(idx...idx, with: fresh)
+            requestAvatars(for: fresh)
             return true
         } catch {
             return false

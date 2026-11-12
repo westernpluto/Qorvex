@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import WebKit
 import ImageIO
 
@@ -87,29 +88,68 @@ struct YouTubeEmbed: UIViewRepresentable {
 }
 
 /// An image, GIF or short video embedded in a comment or text post, shown in place.
+/// Sized to the media's real proportions (measured after loading when Reddit doesn't say),
+/// and the rounded background hugs the media instead of the maximum box.
 struct InlineMediaView: View {
     let entry: GalleryEntry
+    @State private var measured: CGSize?
+
+    private var size: CGSize? { entry.size ?? measured }
 
     private var aspect: CGFloat {
-        guard let s = entry.size, s.width > 0, s.height > 0 else { return 4.0 / 3.0 }
-        return max(s.width / s.height, 0.6)
+        guard let s = size, s.width > 0, s.height > 0 else { return 1 }
+        return max(s.width / s.height, 0.5)
     }
 
     var body: some View {
         Group {
-            if let mp4 = entry.mp4 {
-                InlineVideo(info: VideoInfo(hls: nil, mp4: mp4, poster: entry.mp4 == entry.url ? nil : entry.url, size: entry.size, isGif: true, duration: nil))
-            } else if entry.url.pathExtension.lowercased() == "gif" {
-                AnimatedGIFView(url: entry.url)
+            if size == nil {
+                // Small neutral placeholder until the real proportions are known.
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.secondary.opacity(0.1))
+                    .frame(width: 160, height: 120)
+                    .overlay(ShimmerView())
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else {
-                RemoteImage(url: entry.url, contentMode: .fit)
-                    .onTapGesture { Presenter.shared.viewer = ViewerItem(entries: [entry], index: 0, title: "") }
+                media
+                    .aspectRatio(aspect, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
-        .aspectRatio(aspect, contentMode: .fit)
-        .frame(maxWidth: 340, maxHeight: 300, alignment: .leading)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(maxWidth: 340, maxHeight: 320, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 2)
+        .task(id: entry.id) {
+            guard entry.size == nil, measured == nil else { return }
+            measured = await Self.measure(entry)
+        }
+    }
+
+    @ViewBuilder private var media: some View {
+        if let mp4 = entry.mp4 {
+            InlineVideo(info: VideoInfo(hls: nil, mp4: mp4, poster: entry.mp4 == entry.url ? nil : entry.url, size: size, isGif: true, duration: nil))
+        } else if entry.url.pathExtension.lowercased() == "gif" {
+            AnimatedGIFView(url: entry.url)
+        } else {
+            RemoteImage(url: entry.url, contentMode: .fit)
+                .onTapGesture { Presenter.shared.viewer = ViewerItem(entries: [entry], index: 0, title: "") }
+        }
+    }
+
+    /// Natural size of the media: video track size, or the image's pixel size.
+    static func measure(_ e: GalleryEntry) async -> CGSize? {
+        if let mp4 = e.mp4 {
+            let asset = AVURLAsset(url: mp4)
+            if let track = try? await asset.loadTracks(withMediaType: .video).first,
+               let (natural, transform) = try? await track.load(.naturalSize, .preferredTransform) {
+                let r = CGRect(origin: .zero, size: natural).applying(transform)
+                let s = CGSize(width: abs(r.width), height: abs(r.height))
+                if s.width > 0 && s.height > 0 { return s }
+            }
+        }
+        if let img = await ImageLoader.shared.load(e.url) {
+            return img.size
+        }
+        return CGSize(width: 4, height: 3)
     }
 }
