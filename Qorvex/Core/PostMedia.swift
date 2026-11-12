@@ -188,7 +188,9 @@ enum InlineMedia {
                 guard let kr = Range(m.range(at: 1), in: text), let vr = Range(m.range(at: 2), in: text) else { continue }
                 let kind = text[kr].lowercased()
                 let value = String(text[vr])
-                if meta?[value] != nil { continue } // covered by media_metadata below
+                // Covered by media_metadata only when that entry is usable (Reddit sometimes marks
+                // giphy entries "invalid" with no URLs — then build the media from the token itself).
+                if let m = meta?[value], m.status == nil || m.status == "valid", m.s != nil { continue }
                 let parts = value.split(separator: "|").map(String.init)
                 var still: URL?, mp4: URL?
                 if parts.first == "giphy", parts.count >= 2 {
