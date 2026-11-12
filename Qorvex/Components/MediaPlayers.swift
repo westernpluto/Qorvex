@@ -2,6 +2,37 @@ import SwiftUI
 import AVKit
 import SafariServices
 
+// MARK: - Audio session
+
+/// Silent media (GIFs, muted videos) mixes with the user's music; only video with sound takes
+/// over audio, and audio is handed back as soon as that ends.
+enum AudioSession {
+    private static var soundUsers = 0
+
+    /// Default: never interrupt other audio.
+    static func ambient() {
+        let s = AVAudioSession.sharedInstance()
+        try? s.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+    }
+
+    /// A video is playing with sound.
+    static func beginSound() {
+        soundUsers += 1
+        let s = AVAudioSession.sharedInstance()
+        try? s.setCategory(.playback, mode: .moviePlayback)
+        try? s.setActive(true)
+    }
+
+    /// Sound playback ended: return to mixing and let the user's music resume.
+    static func endSound() {
+        soundUsers = max(0, soundUsers - 1)
+        guard soundUsers == 0 else { return }
+        let s = AVAudioSession.sharedInstance()
+        try? s.setActive(false, options: [.notifyOthersOnDeactivation])
+        ambient()
+    }
+}
+
 // MARK: - Inline looping video (feed)
 
 final class PlayerUIView: UIView {
@@ -61,7 +92,7 @@ struct InlineVideo: View {
                     Button {
                         muted.toggle()
                         player?.isMuted = muted
-                        if !muted { try? AVAudioSession.sharedInstance().setCategory(.playback) }
+                        if muted { AudioSession.endSound() } else { AudioSession.beginSound() }
                         Haptics.tap()
                     } label: {
                         Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
@@ -101,6 +132,7 @@ struct InlineVideo: View {
 
     private func stop() {
         player?.pause()
+        if !muted { muted = true; AudioSession.endSound() }
         playing = false
         player = nil
         looper = nil
@@ -112,7 +144,6 @@ struct InlineVideo: View {
 struct FullscreenPlayer: UIViewControllerRepresentable {
     let url: URL
     func makeUIViewController(context: Context) -> AVPlayerViewController {
-        try? AVAudioSession.sharedInstance().setCategory(.playback)
         let vc = AVPlayerViewController()
         let p = AVPlayer(url: url)
         p.isMuted = false
@@ -246,9 +277,12 @@ struct FullscreenVideoView: View {
         }
         .statusBarHidden()
         .onAppear {
-            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            AudioSession.beginSound()
             player.play()
         }
-        .onDisappear { player.pause() }
+        .onDisappear {
+            player.pause()
+            AudioSession.endSound()
+        }
     }
 }

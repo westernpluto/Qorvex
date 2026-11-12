@@ -5,7 +5,7 @@ import AVFoundation
 struct QorvexApp: App {
     init() {
         // Let inline muted videos play without interrupting the user's music.
-        try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback, options: [.mixWithOthers])
+        AudioSession.ambient()
         Task.detached(priority: .background) { await RedditClient.shared.prune() }
         CrashReporter.shared.start()
     }
