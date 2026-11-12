@@ -296,7 +296,7 @@ struct ConnectionLogView: View {
 }
 
 struct CrashReportsView: View {
-    @State private var reports = CrashReporter.load()
+    @State private var reports = CrashReporter.loadReports()
 
     var body: some View {
         List {
@@ -324,6 +324,6 @@ struct CrashReportsView: View {
                     .disabled(reports.isEmpty)
             }
         }
-        .refreshable { reports = CrashReporter.load() }
+        .refreshable { reports = CrashReporter.loadReports() }
     }
 }

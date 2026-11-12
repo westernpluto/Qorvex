@@ -26,7 +26,7 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
 
     func didReceive(_ payloads: [MXDiagnosticPayload]) { ingest(payloads) }
 
-    static func load() -> [CrashReport] {
+    static func loadReports() -> [CrashReport] {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
         return (try? Data(contentsOf: fileURL)).flatMap { try? dec.decode([CrashReport].self, from: $0) } ?? []
@@ -35,20 +35,21 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
     static func clear() { try? FileManager.default.removeItem(at: fileURL) }
 
     private func ingest(_ payloads: [MXDiagnosticPayload]) {
-        let new: [CrashReport] = payloads.flatMap { p in
-            (p.crashDiagnostics ?? []).map { c in
+        var new: [CrashReport] = []
+        for p in payloads {
+            for c in p.crashDiagnostics ?? [] {
                 var parts: [String] = []
                 parts.append("v\(c.metaData.applicationVersion)")
                 if let t = c.exceptionType { parts.append("exception \(t)") }
-                if let s = c.signal { parts.append("signal \(s)") }
+                if let sig = c.signal { parts.append("signal \(sig)") }
                 if let r = c.terminationReason, !r.isEmpty { parts.append(r) }
                 let details = String(decoding: c.jsonRepresentation(), as: UTF8.self)
-                return CrashReport(date: p.timeStampEnd, summary: parts.joined(separator: " · "), details: details)
+                new.append(CrashReport(date: p.timeStampEnd, summary: parts.joined(separator: " · "), details: details))
             }
         }
         guard !new.isEmpty else { return }
         queue.async {
-            var all = CrashReporter.load()
+            var all = CrashReporter.loadReports()
             let existing = Set(all.map { "\($0.date.timeIntervalSince1970)\($0.summary)" })
             all.insert(contentsOf: new.filter { !existing.contains("\($0.date.timeIntervalSince1970)\($0.summary)") }, at: 0)
             if all.count > 10 { all = Array(all.prefix(10)) }
