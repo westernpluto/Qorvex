@@ -80,7 +80,7 @@ final class FeedModel {
     /// Set once Reddit refuses the signed-in front page, so we don't keep asking this session.
     static var frontPageBlocked = false
 
-    var usingFrontPage: Bool { source == .home && NetworkStatus.shared.signedIn && !Self.frontPageBlocked }
+    @MainActor var usingFrontPage: Bool { source == .home && NetworkStatus.shared.signedIn && !Self.frontPageBlocked }
 
     @MainActor @discardableResult
     private func loadSingle(path: String, reset: Bool, force: Bool, gen: Int) async -> Error? {
