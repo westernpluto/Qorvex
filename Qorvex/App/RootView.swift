@@ -94,14 +94,13 @@ struct AdaptiveStack<Root: View>: View {
     @ViewBuilder let root: () -> Root
     @State private var listRouter = Router()
     @State private var detailRouter = Router()
-    @State private var columns: NavigationSplitViewVisibility = .all
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var settings: AppSettings { .shared }
 
     var body: some View {
         Group {
             if settings.twoPane {
-                NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $listRouter.compactColumn) {
+                NavigationSplitView(columnVisibility: $listRouter.columns, preferredCompactColumn: $listRouter.compactColumn) {
                     NavigationStack(path: $listRouter.path) {
                         root()
                             .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
@@ -109,6 +108,7 @@ struct AdaptiveStack<Root: View>: View {
                     .environment(listRouter)
                     .handlesLinks(listRouter)
                     .navigationSplitViewColumnWidth(min: 320, ideal: 420, max: 560)
+                    .toolbar(removing: .sidebarToggle)
                 } detail: {
                     NavigationStack(path: $detailRouter.path) {
                         Group {
@@ -151,6 +151,8 @@ struct AdaptiveStack<Root: View>: View {
 
     private func configure() {
         listRouter.detail = detailRouter
+        detailRouter.list = settings.twoPane ? listRouter : nil
+        listRouter.columns = .all
         listRouter.splitActive = settings.twoPane
         detailRouter.splitActive = false
     }

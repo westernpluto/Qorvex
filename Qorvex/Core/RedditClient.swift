@@ -314,7 +314,7 @@ actor RedditClient {
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
         let entry = RequestLog(via: via, url: url.absoluteString, status: status, contentType: ct, location: location,
-                               snippet: ct.contains("json") && (200..<300).contains(status) ? "" : snippet)
+                               snippet: ct.contains("json") && (200..<300).contains(status) && !url.path.hasPrefix("/api/morechildren") ? "" : snippet)
         await MainActor.run { NetworkStatus.shared.record(entry) }
     }
 

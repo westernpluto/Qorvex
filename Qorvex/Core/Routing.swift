@@ -87,10 +87,26 @@ final class Router {
     var path = NavigationPath()
     var detailRoot: PostRef?
     var compactColumn: NavigationSplitViewColumn = .sidebar
+    var columns: NavigationSplitViewVisibility = .all
     @ObservationIgnored weak var detail: Router?
+    /// Set on the detail router: communities, users and other browse screens open in the list pane.
+    @ObservationIgnored weak var list: Router?
     @ObservationIgnored var splitActive = false
 
-    func push(_ r: Route) { path.append(r) }
+    func push(_ r: Route) {
+        if let list {
+            switch r {
+            case .post:
+                path.append(r)
+            default:
+                list.path.append(r)
+                list.compactColumn = .sidebar
+                list.columns = .all
+            }
+            return
+        }
+        path.append(r)
+    }
 
     func open(_ post: Post) {
         Library.shared.markRead(post)
@@ -102,6 +118,7 @@ final class Router {
             d.path = NavigationPath()
             d.detailRoot = ref
             compactColumn = .detail
+            columns = .all
         } else {
             path.append(Route.post(ref))
         }

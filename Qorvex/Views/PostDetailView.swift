@@ -113,8 +113,10 @@ final class CommentsModel {
     }
 
     @MainActor
-    func loadMore(_ node: CommentNode) async {
-        guard case .more(let m) = node.kind, !loadingMore.contains(node.id) else { return }
+    /// Returns false when Reddit returned nothing usable (the caller then opens the thread instead).
+    @discardableResult
+    func loadMore(_ node: CommentNode) async -> Bool {
+        guard case .more(let m) = node.kind, !loadingMore.contains(node.id) else { return true }
         loadingMore.insert(node.id)
         defer { loadingMore.remove(node.id) }
         let batch = Array(m.children.prefix(100))
@@ -148,11 +150,16 @@ final class CommentsModel {
                 remaining.count = rest.count
                 new.append(CommentNode(id: "more-" + m.id + "-\(rest.count)", kind: .more(remaining), depth: node.depth))
             }
-            guard let idx = nodes.firstIndex(where: { $0.id == node.id }) else { return }
             let existing = Set(nodes.map(\.id))
-            nodes.replaceSubrange(idx...idx, with: new.filter { !existing.contains($0.id) })
+            let fresh = new.filter { !existing.contains($0.id) }
+            let gotComments = fresh.contains { if case .comment = $0.kind { return true } else { return false } }
+            // Never remove the button unless real replies came back.
+            guard gotComments, let idx = nodes.firstIndex(where: { $0.id == node.id }) else { return false }
+            nodes.replaceSubrange(idx...idx, with: fresh)
+            return true
         } catch {
             Presenter.shared.show(error.localizedDescription)
+            return true
         }
     }
 }
@@ -308,7 +315,9 @@ struct PostDetailView: View {
             // (or the post on reddit.com for top-level overflow).
             Button {
                 if Reddit.apiActive {
-                    Task { await model.loadMore(node) }
+                    Task {
+                        if await model.loadMore(node) == false { openMoreThread(m) }
+                    }
                 } else if let parent = m.parent_id, parent.hasPrefix("t1_") {
                     router.push(.post(PostRef(id: ref.id, commentID: String(parent.dropFirst(3)), preview: model.post)))
                 } else if let p = model.post {
@@ -339,6 +348,15 @@ struct PostDetailView: View {
             .padding(.leading, CGFloat(node.depth) * 12 + 10)
             .listRowSeparator(.hidden)
             .listRowBackground(Color.cardBackground)
+        }
+    }
+
+    /// Fallback for "load more": open that part of the thread as its own page.
+    private func openMoreThread(_ m: More) {
+        if let parent = m.parent_id, parent.hasPrefix("t1_") {
+            router.push(.post(PostRef(id: ref.id, commentID: String(parent.dropFirst(3)), preview: model.post)))
+        } else if let first = m.children.first {
+            router.push(.post(PostRef(id: ref.id, commentID: first, preview: model.post)))
         }
     }
 

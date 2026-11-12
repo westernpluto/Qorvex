@@ -224,11 +224,21 @@ struct FeedView: View {
         .toolbar { toolbar }
         .refreshable { await model.load(reset: true, force: true) }
         .task { if model.posts.isEmpty && !model.loading { await model.load(reset: true) } }
-        .onChange(of: library.subs) { _, _ in if source == .home { Task { await model.load(reset: true) } } }
+        .onChange(of: library.subs) { _, _ in if source == .home && !model.usingFrontPage { Task { await model.load(reset: true) } } }
+        .onChange(of: NetworkStatus.shared.signedIn) { _, _ in reloadIfMulti() }
+        .onChange(of: AppSettings.shared.fullAccess) { _, _ in reloadIfMulti() }
         .onChange(of: filterCount) { _, _ in
             model.posts.removeAll { !library.shouldShow($0) }
         }
         .onChange(of: library.hidden.count) { _, _ in model.posts.removeAll { library.hidden.contains($0.id) } }
+    }
+
+    /// Home and custom feeds change source when sign-in or key-free mode is confirmed.
+    private func reloadIfMulti() {
+        switch source {
+        case .home, .custom: Task { await model.load(reset: true) }
+        default: break
+        }
     }
 
     @ViewBuilder private var footer: some View {
