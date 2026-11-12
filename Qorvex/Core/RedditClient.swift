@@ -215,7 +215,9 @@ actor RedditClient {
         let mode = await MainActor.run { AppSettings.shared.connection }
         let sep = path.contains("?") ? "&" : "?"
         guard let url = URL(string: host + path + sep + "raw_json=1") else { throw RedditError.notFound }
-        let browserFirst = mode == .browser || (mode == .automatic && preferBrowser)
+        let signedIn = await MainActor.run { NetworkStatus.shared.signedIn }
+        // Signed in: go straight to the browser engine, which carries the session like Safari.
+        let browserFirst = mode == .browser || (mode == .automatic && (preferBrowser || signedIn))
         // After hitting the login wall, don't keep knocking: fail fast for a couple of minutes.
         if Date() < loginWallUntil { throw RedditError.loginRequired }
         do {

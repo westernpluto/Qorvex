@@ -35,15 +35,16 @@ final class WebTransport: NSObject, WKNavigationDelegate {
         let v = WKWebView(frame: CGRect(x: 0, y: 0, width: 2, height: 2), configuration: cfg)
         v.isUserInteractionEnabled = false
         v.alpha = 0.01
-        v.customUserAgent = nil
+        v.customUserAgent = WebTransport.safariUserAgent
         return v
     }
 
     /// The real Safari user agent of this device, used for direct requests too.
     static var safariUserAgent: String {
         let v = UIDevice.current.systemVersion
-        let major = v.split(separator: ".").first.map(String.init) ?? "18"
-        return "Mozilla/5.0 (iPhone; CPU iPhone OS \(v.replacingOccurrences(of: ".", with: "_")) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
+        let parts = v.split(separator: ".").map(String.init)
+        let version = parts.prefix(2).joined(separator: ".")
+        return "Mozilla/5.0 (iPhone; CPU iPhone OS \(v.replacingOccurrences(of: ".", with: "_")) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version.isEmpty ? "18.0" : version) Mobile/15E148 Safari/604.1"
     }
 
     /// Throw away the hidden browser and start a fresh one, so it picks up a new sign-in.
@@ -69,29 +70,13 @@ final class WebTransport: NSObject, WKNavigationDelegate {
     }
 
     func fetch(_ url: URL) async throws -> Response {
-        guard let scheme = url.scheme, let host = url.host else { throw RedditError.notFound }
-        let origin = "\(scheme)://\(host)"
+        guard url.scheme != nil, url.host != nil else { throw RedditError.notFound }
         await syncCookiesToURLSession()
-
-        if preferNavigation { return try await navigate(url) }
-
-        try await prime(origin, full: false)
-        var r = try await run(url)
-        if r.status == 429 { return r }
-        if Self.looksBlocked(r), Date().timeIntervalSince(lastFullPrime) > 600 {
-            // Open the real front page (at most every 10 min) so the session is established, then retry once.
-            lastFullPrime = Date()
-            try await prime(origin, full: true)
-            r = try await run(url)
-            if r.status == 429 { return r }
-        }
-        if Self.looksBlocked(r) && !triedNavigation {
+        // Open the JSON URL as a normal page, exactly like typing it into Safari's address bar.
+        let r = try await navigate(url)
+        if Self.looksBlocked(r) && r.status != 429 && !triedNavigation {
             triedNavigation = true
             await logCookies(for: url)
-            // fetch() was treated as signed out; try loading the JSON as a normal page, once per launch.
-            let n = try await navigate(url)
-            if !Self.looksBlocked(n) { preferNavigation = true }
-            return n
         }
         return r
     }
@@ -103,7 +88,7 @@ final class WebTransport: NSObject, WKNavigationDelegate {
 
     private func run(_ url: URL) async throws -> Response {
         let js = """
-        const r = await fetch(u, { credentials: 'include', headers: { 'Accept': 'application/json' } });
+        const r = await fetch(u, { credentials: 'include' });
         const t = await r.text();
         return [r.status, r.headers.get('content-type') || '', t, r.headers.get('retry-after') || '', r.url || ''];
         """
@@ -284,6 +269,7 @@ private struct VerifyWebView: UIViewRepresentable {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
         let v = WKWebView(frame: .zero, configuration: cfg)
+        v.customUserAgent = WebTransport.safariUserAgent
         v.allowsBackForwardNavigationGestures = true
         v.load(URLRequest(url: url))
         return v
