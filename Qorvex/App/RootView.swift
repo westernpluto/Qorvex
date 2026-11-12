@@ -1,17 +1,20 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case home, search, saved, settings
+    case home, communities, search, saved, settings
     var id: String { rawValue }
     var label: String { rawValue.capitalized }
     var icon: String {
         switch self {
         case .home: return "house.fill"
+        case .communities: return "square.grid.2x2.fill"
         case .search: return "magnifyingglass"
         case .saved: return "bookmark.fill"
         case .settings: return "gearshape.fill"
         }
     }
+    /// Tabs that open posts get the feed | post split when there's room.
+    var usesSplit: Bool { self != .settings }
 }
 
 /// Launch flags used by CI to photograph specific screens in the simulator.
@@ -33,7 +36,7 @@ struct RootView: View {
     var body: some View {
         TabView(selection: $tab) {
             ForEach(AppTab.allCases) { t in
-                AdaptiveStack { rootContent(t) }
+                AdaptiveStack(split: t.usesSplit) { rootContent(t) }
                     .tabItem { Label(t.label, systemImage: t.icon) }
                     .tag(t)
             }
@@ -56,9 +59,7 @@ struct RootView: View {
         }
         .fullScreenCover(item: $presenter.viewer) { v in MediaViewer(item: v) }
         .fullScreenCover(item: $presenter.video) { v in
-            // The system player has its own close button; don't stack a second one on top.
-            FullscreenPlayer(url: v.url)
-                .ignoresSafeArea()
+            FullscreenVideoView(url: v.url)
         }
         .task {
             await RedditAccount.refresh()
@@ -72,7 +73,8 @@ struct RootView: View {
     @ViewBuilder
     private func rootContent(_ t: AppTab) -> some View {
         switch t {
-        case .home: HomeView()
+        case .home: FeedView(source: .home)
+        case .communities: CommunitiesView()
         case .search: SearchView()
         case .saved: SavedTab()
         case .settings: SettingsView()
@@ -96,6 +98,7 @@ private struct PacingOverlay: View {
 /// or unfolding (iPhone Duo), rotating, or resizing never resets where you are: SwiftUI collapses
 /// it into a single stack when the space is compact and expands it again when there's room.
 struct AdaptiveStack<Root: View>: View {
+    var split: Bool = true
     @ViewBuilder let root: () -> Root
     @State private var listRouter = Router()
     @State private var detailRouter = Router()
@@ -105,7 +108,7 @@ struct AdaptiveStack<Root: View>: View {
 
     var body: some View {
         Group {
-            if settings.twoPane {
+            if settings.twoPane && split {
                 NavigationSplitView(columnVisibility: $listRouter.columns, preferredCompactColumn: $listRouter.compactColumn) {
                     NavigationStack(path: $listRouter.path) {
                         root()
@@ -113,7 +116,7 @@ struct AdaptiveStack<Root: View>: View {
                     }
                     .environment(listRouter)
                     .handlesLinks(listRouter)
-                    .navigationSplitViewColumnWidth(min: 320, ideal: 420, max: 560)
+                    .navigationSplitViewColumnWidth(min: 360, ideal: 460, max: 620)
                     .toolbar(removing: .sidebarToggle)
                 } detail: {
                     NavigationStack(path: $detailRouter.path) {
@@ -159,7 +162,7 @@ struct AdaptiveStack<Root: View>: View {
     /// Two columns only when there's room (inner display unfolded, landscape, iPad). On the narrow
     /// outer display posts are pushed onto the stack like a normal iPhone app.
     private func configure() {
-        let wide = settings.twoPane && sizeClass == .regular
+        let wide = settings.twoPane && split && sizeClass == .regular
         // Carry an open post across folding/unfolding so it always lands where posts belong.
         if let was = wasWide, was != wide {
             if wide, let ref = listRouter.compactPost, listRouter.path.count == listRouter.compactDepth, !listRouter.path.isEmpty {

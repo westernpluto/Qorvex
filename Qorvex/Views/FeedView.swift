@@ -183,58 +183,6 @@ final class FeedModel {
     func remove(_ id: String) { posts.removeAll { $0.id == id } }
 }
 
-/// Home tab: one feed at a time, switched in place with the chip row at the top.
-struct HomeView: View {
-    @State private var source: FeedSource = .home
-    var body: some View {
-        FeedView(source: source, switcher: $source).id(source)
-    }
-}
-
-/// Horizontally scrolling feed chips: Home, Popular, All, then your communities.
-struct FeedChips: View {
-    @Binding var selection: FeedSource
-    private var library: Library { .shared }
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chip(.home, title: "Home", icon: "house.fill")
-                chip(.popular, title: "Popular", icon: "flame.fill")
-                chip(.all, title: "All", icon: "globe")
-                ForEach(library.sortedSubs, id: \.self) { s in
-                    chip(.subreddit(s), title: s, avatar: s)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 2)
-        }
-        .scrollClipDisabled()
-    }
-
-    private func chip(_ src: FeedSource, title: String, icon: String? = nil, avatar: String? = nil) -> some View {
-        let on = selection == src
-        return Button {
-            guard selection != src else { return }
-            Haptics.tap(.soft)
-            selection = src
-        } label: {
-            HStack(spacing: 6) {
-                if let icon { Image(systemName: icon).font(.footnote.weight(.semibold)) }
-                if let avatar { Avatar(name: avatar, url: library.icon(for: avatar), size: 22) }
-                Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
-            }
-            .padding(.leading, avatar == nil ? 14 : 6).padding(.trailing, 14)
-            .frame(minHeight: 38)
-            .foregroundStyle(on ? Color.white : Color.primary)
-            .background(on ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(Color.secondary.opacity(0.14)), in: Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .animation(.snappy(duration: 0.2), value: on)
-    }
-}
-
 struct FeedView: View {
     let source: FeedSource
     var switcher: Binding<FeedSource>? = nil
@@ -249,7 +197,7 @@ struct FeedView: View {
         _model = State(initialValue: FeedModel(source: source))
     }
 
-    private var isRoot: Bool { switcher != nil }
+    private var isRoot: Bool { source == .home }
 
     private var filterCount: Int {
         let f = library.filters
@@ -258,12 +206,6 @@ struct FeedView: View {
 
     var body: some View {
         List {
-            if let switcher {
-                FeedChips(selection: switcher)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 6, trailing: 0))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            }
             if let sub = source.subredditName {
                 SubredditHeader(name: sub, detail: model.posts.first?.sr_detail)
                     .listRowInsets(EdgeInsets())
@@ -294,7 +236,7 @@ struct FeedView: View {
         .refreshable { await model.load(reset: true, force: true) }
         .task {
             if model.posts.isEmpty && !model.loading { await model.load(reset: true) }
-            if switcher != nil, LaunchArgs.openSample, let first = model.posts.first {
+            if isRoot, LaunchArgs.openSample, let first = model.posts.first {
                 LaunchArgs.openSample = false
                 router.open(first)
             }

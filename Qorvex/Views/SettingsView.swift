@@ -19,24 +19,26 @@ struct SettingsView: View {
 
             Section("Appearance") {
                 Picker("Theme", selection: $settings.theme) { ForEach(AppTheme.allCases) { Text($0.label).tag($0) } }
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("Accent Color")
-                    HStack(spacing: 0) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 8), spacing: 10) {
                         ForEach(AccentChoice.allCases) { a in
                             Circle()
                                 .fill(a.color.gradient)
-                                .frame(width: 28, height: 28)
-                                .overlay(Circle().stroke(Color.primary, lineWidth: settings.accent == a ? 2.5 : 0).padding(-4))
-                                .frame(maxWidth: .infinity)
+                                .frame(width: 26, height: 26)
+                                .padding(5)
+                                .overlay(Circle().stroke(Color.primary, lineWidth: settings.accent == a ? 2 : 0))
+                                .contentShape(Circle())
                                 .onTapGesture { withAnimation(.snappy) { settings.accent = a }; Haptics.tap() }
+                                .accessibilityLabel(a.rawValue.capitalized)
                         }
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
                 Picker("Text Size", selection: $settings.textSize) { ForEach(TextSize.allCases) { Text($0.label).tag($0) } }
                 Picker("Layout", selection: $settings.layout) { ForEach(PostLayout.allCases) { Text($0.label).tag($0) } }
                     .pickerStyle(.segmented)
-                Toggle("Two Panes When Unfolded", isOn: $settings.twoPane)
+                Toggle("Two-Pane Layout", isOn: $settings.twoPane)
             }
 
             Section("Reading") {
@@ -79,19 +81,16 @@ struct AccountCard: View {
         let net = NetworkStatus.shared
         if net.signedIn {
             HStack(spacing: 14) {
-                Avatar(name: net.username ?? "R", size: 46)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(net.username.map { "u/\($0)" } ?? "Signed in").font(.headline)
-                    Text("Reddit account").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Sign Out", role: .destructive) {
-                    Task { await RedditAccount.signOut(); Presenter.shared.show("Signed out") }
-                }
-                .buttonStyle(.borderless)
-                .font(.subheadline.weight(.semibold))
+                Avatar(name: net.username ?? "R", url: net.username.flatMap { AvatarStore.shared.url(for: $0) }, size: 44)
+                Text(net.username.map { "u/\($0)" } ?? "Signed in")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .padding(.vertical, 4)
+            Button("Sign Out", role: .destructive) {
+                Task { await RedditAccount.signOut(); Presenter.shared.show("Signed out") }
+            }
         } else {
             Button { Presenter.shared.verify = true } label: {
                 HStack(spacing: 14) {

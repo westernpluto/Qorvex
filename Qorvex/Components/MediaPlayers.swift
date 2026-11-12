@@ -203,3 +203,52 @@ struct ZoomableImage: UIViewRepresentable {
         }
     }
 }
+
+/// Full-screen video with system playback controls, a close button where your thumb rests
+/// (bottom trailing) and swipe-down to dismiss.
+struct FullscreenVideoView: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer
+    @State private var drag: CGFloat = 0
+
+    init(url: URL) {
+        self.url = url
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Color.black
+                .opacity(1 - min(0.6, Double(abs(drag)) / 400))
+                .ignoresSafeArea()
+            VideoPlayer(player: player)
+                .ignoresSafeArea()
+                .offset(y: drag)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 24)
+                        .onChanged { v in
+                            if v.translation.height > 0 && abs(v.translation.height) > abs(v.translation.width) {
+                                drag = v.translation.height
+                            }
+                        }
+                        .onEnded { v in
+                            if v.translation.height > 120 || v.predictedEndTranslation.height > 420 { dismiss() }
+                            else { withAnimation(.spring(duration: 0.3)) { drag = 0 } }
+                        }
+                )
+            CircleButton(system: "xmark") { dismiss() }
+                .foregroundStyle(.white)
+                .padding(.trailing, 22)
+                .padding(.bottom, 96)
+                .opacity(drag > 0 ? 0 : 1)
+                .accessibilityLabel("Close video")
+        }
+        .statusBarHidden()
+        .onAppear {
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            player.play()
+        }
+        .onDisappear { player.pause() }
+    }
+}

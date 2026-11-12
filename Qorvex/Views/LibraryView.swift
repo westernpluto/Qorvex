@@ -177,3 +177,81 @@ struct DiscoverView: View {
         .navigationTitle("Discover")
     }
 }
+
+/// Communities tab: Popular, All and your communities, one tap away from the side tab bar.
+struct CommunitiesView: View {
+    @State private var filter = ""
+    @Environment(Router.self) private var router
+    private var library: Library { .shared }
+
+    private var subs: [String] {
+        let all = library.sortedSubs
+        let f = filter.trimmingCharacters(in: .whitespaces)
+        return f.isEmpty ? all : all.filter { $0.localizedCaseInsensitiveContains(f) }
+    }
+
+    var body: some View {
+        List {
+            if filter.isEmpty {
+                Section {
+                    feedRow(.popular, title: "Popular", icon: "flame.fill", color: .orange)
+                    feedRow(.all, title: "All", icon: "globe", color: .green)
+                }
+            }
+
+            Section {
+                if !NetworkStatus.shared.signedIn && library.subs.isEmpty {
+                    SignInBanner().listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                } else if subs.isEmpty {
+                    Text(filter.isEmpty ? "You haven't joined any communities yet." : "No matches")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(subs, id: \.self) { s in
+                    NavigationLink(value: Route.feed(.subreddit(s))) {
+                        HStack(spacing: 14) {
+                            Avatar(name: s, url: library.icon(for: s), size: 34)
+                            Text("r/\(s)")
+                                .font(.body.weight(.medium))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .frame(minHeight: 44)
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            library.toggleSubscription(s)
+                            Task { try? await RedditClient.shared.subscribe(s, join: false) }
+                        } label: { Label("Leave r/\(s)", systemImage: "minus.circle") }
+                    }
+                }
+            } header: {
+                if !library.subs.isEmpty { Text("Your Communities · \(library.subs.count)") }
+            }
+
+            if filter.isEmpty {
+                Section {
+                    NavigationLink(value: Route.discover) {
+                        Label("Discover Communities", systemImage: "sparkles").frame(minHeight: 44)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Communities")
+        .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Filter communities")
+    }
+
+    private func feedRow(_ src: FeedSource, title: String, icon: String, color: Color) -> some View {
+        NavigationLink(value: Route.feed(src)) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(color.gradient, in: Circle())
+                Text(title).font(.body.weight(.medium))
+            }
+            .frame(minHeight: 44)
+        }
+    }
+}
