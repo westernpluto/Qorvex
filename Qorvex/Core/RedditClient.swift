@@ -2,13 +2,14 @@ import Foundation
 import Observation
 
 enum RedditError: LocalizedError {
-    case offline, rateLimited, notFound, privateCommunity, banned, quarantined, blocked(Int), http(Int), decoding
+    case offline, rateLimited, notFound, privateCommunity, banned, quarantined, blocked(Int), loginRequired, http(Int), decoding
 
     var errorDescription: String? {
         switch self {
         case .offline: return "You're offline"
         case .rateLimited: return "Reddit asked us to slow down for a moment"
         case .notFound: return "Not found"
+        case .loginRequired: return "Reddit now requires signing in"
         case .privateCommunity: return "This community is private"
         case .banned: return "This community has been banned"
         case .quarantined: return "This community is quarantined"
@@ -51,6 +52,8 @@ final class NetworkStatus {
     var recent: [Date] = []
     var lastError: String?
     var blocked = false
+    var loginRequired = false
+    var signedIn = false
     var usingBrowserEngine = false
     var backoffUntil: Date?
 
@@ -213,35 +216,47 @@ actor RedditClient {
         do {
             try await acquireSlot()
             let data = browserFirst ? try await viaBrowser(url) : try await viaDirect(url)
-            await setBlocked(false)
+            await setState(blocked: false, login: false)
             return data
+        } catch RedditError.loginRequired {
+            // Direct requests carry synced cookies, but the browser engine holds the freshest
+            // session; give it one try before asking the user to sign in.
+            if mode == .automatic && !browserFirst {
+                preferBrowser = true
+                do {
+                    try await acquireSlot()
+                    let data = try await viaBrowser(url)
+                    await setState(blocked: false, login: false)
+                    return data
+                } catch RedditError.loginRequired { } catch RedditError.blocked { }
+            }
+            await setState(blocked: false, login: true)
+            throw RedditError.loginRequired
         } catch RedditError.blocked(let code) {
-            guard mode == .automatic else { await setBlocked(true); throw RedditError.blocked(code) }
-            // Direct request was filtered: switch to the browser engine for the rest of the session.
+            guard mode == .automatic else { await setState(blocked: true, login: false); throw RedditError.blocked(code) }
             if !browserFirst {
                 preferBrowser = true
                 await MainActor.run { NetworkStatus.shared.usingBrowserEngine = true }
                 do {
                     try await acquireSlot()
                     let data = try await viaBrowser(url)
-                    await setBlocked(false)
+                    await setState(blocked: false, login: false)
                     return data
+                } catch RedditError.loginRequired {
+                    await setState(blocked: false, login: true)
+                    throw RedditError.loginRequired
                 } catch RedditError.blocked { }
             }
-            // Last resort: the other Reddit host.
-            if let alt = URL(string: url.absoluteString.replacingOccurrences(of: host, with: host.contains("old.") ? "https://www.reddit.com" : "https://old.reddit.com")), alt != url {
-                do {
-                    try await acquireSlot()
-                    let data = try await viaBrowser(alt)
-                    await setBlocked(false)
-                    return data
-                } catch RedditError.blocked(let c) {
-                    await setBlocked(true)
-                    throw RedditError.blocked(c)
-                }
-            }
-            await setBlocked(true)
+            await setState(blocked: true, login: false)
             throw RedditError.blocked(code)
+        }
+    }
+
+    private func setState(blocked: Bool, login: Bool) async {
+        await MainActor.run {
+            let s = NetworkStatus.shared
+            if s.blocked != blocked { s.blocked = blocked }
+            if s.loginRequired != login { s.loginRequired = login }
         }
     }
 
@@ -258,6 +273,11 @@ actor RedditClient {
         let entry = RequestLog(via: via, url: url.absoluteString, status: status, contentType: ct, location: location,
                                snippet: ct.contains("json") && (200..<300).contains(status) ? "" : snippet)
         await MainActor.run { NetworkStatus.shared.record(entry) }
+    }
+
+    /// Reddit sends signed-out JSON requests to /login (old) or to the front page (www).
+    private static func isLoginWall(_ u: URL) -> Bool {
+        u.path.hasPrefix("/login") || u.path.hasPrefix("/account/login") || u.path == "/" || u.path.isEmpty
     }
 
     private static func isJSONResource(_ u: URL) -> Bool {
@@ -284,9 +304,9 @@ actor RedditClient {
             if (300..<400).contains(http.statusCode) {
                 // Follow only if Reddit points at the same JSON resource (e.g. another host);
                 // anything else (login, interstitial, HTML page) means the request was filtered.
-                if let location, let next = URL(string: location, relativeTo: url)?.absoluteURL, Self.isJSONResource(next) {
-                    url = next
-                    continue
+                if let location, let next = URL(string: location, relativeTo: url)?.absoluteURL {
+                    if Self.isJSONResource(next) { url = next; continue }
+                    if Self.isLoginWall(next) { throw RedditError.loginRequired }
                 }
                 throw RedditError.blocked(http.statusCode)
             }
@@ -299,7 +319,10 @@ actor RedditClient {
         let r = try await WebTransport.shared.fetch(url)
         let redirectedAway = r.finalURL.map { !Self.isJSONResource($0) } ?? false
         await log("browser", url, r.status, r.contentType, redirectedAway ? r.finalURL?.absoluteString : nil, r.data)
-        if redirectedAway { throw RedditError.blocked(r.status == 200 ? 302 : r.status) }
+        if redirectedAway {
+            if let f = r.finalURL, Self.isLoginWall(f) { throw RedditError.loginRequired }
+            throw RedditError.blocked(r.status == 200 ? 302 : r.status)
+        }
         return try await interpret(status: r.status, contentType: r.contentType, retryAfter: r.retryAfter, data: r.data)
     }
 

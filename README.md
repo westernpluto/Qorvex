@@ -4,6 +4,10 @@ A native iOS Reddit reader built in Swift and SwiftUI. It's free, private, and n
 
 Qorvex reads Reddit's public JSON pages directly from your iPhone. There's no API key, no OAuth app, no login, and no server in the middle. Every request comes from your own device.
 
+## Reddit account
+
+Reddit now redirects signed-out requests for feed data to its login page, so Qorvex asks you to **sign in once on reddit.com itself** (in an in-app Reddit page). Qorvex never sees your password. It reads with that session the way Safari would, and still paces itself under the limits below. Sign out any time in Settings → Reddit Account.
+
 ## About rate limits
 
 Reddit limits anonymous traffic to roughly 10 requests per minute per IP. Qorvex never goes over that limit:

@@ -54,6 +54,7 @@ struct RootView: View {
                         .padding(.leading, 16).padding(.top, 8)
                 }
         }
+        .task { await RedditAccount.refresh() }
         .tint(settings.accent.color)
         .preferredColorScheme(settings.theme.scheme)
         .dynamicTypeSize(settings.textSize.dynamic)

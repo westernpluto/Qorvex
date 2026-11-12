@@ -131,20 +131,44 @@ final class WebTransport: NSObject, WKNavigationDelegate {
     }
 }
 
-/// A visible reddit.com page so the user can pass any check Reddit shows. Shares cookies with
-/// the hidden transport and with direct requests.
+/// The user's own reddit.com web session (cookies in the shared WebKit store). Reddit requires a
+/// signed-in session to read feed data; signing in happens on Reddit's own page, so Qorvex never
+/// sees the password.
+@MainActor
+enum RedditAccount {
+    static func isSignedIn() async -> Bool {
+        let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+        return cookies.contains { $0.name == "reddit_session" && $0.domain.contains("reddit.com") && ($0.expiresDate ?? .distantFuture) > Date() }
+    }
+
+    static func signOut() async {
+        let store = WKWebsiteDataStore.default()
+        let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+        await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: records.filter { $0.displayName.contains("reddit") })
+        for c in HTTPCookieStorage.shared.cookies ?? [] where c.domain.contains("reddit.com") { HTTPCookieStorage.shared.deleteCookie(c) }
+        WebTransport.shared.reset()
+        NetworkStatus.shared.signedIn = false
+    }
+
+    static func refresh() async {
+        NetworkStatus.shared.signedIn = await isSignedIn()
+    }
+}
+
+/// Reddit's own login page in a sheet. Closes itself as soon as the session cookie appears.
 struct RedditVerifyView: View {
     @Environment(\.dismiss) private var dismiss
     var onDone: () -> Void = {}
+    @State private var finished = false
 
     var body: some View {
         NavigationStack {
-            VerifyWebView(url: URL(string: "https://www.reddit.com/")!)
+            VerifyWebView(url: URL(string: "https://www.reddit.com/login/")!)
                 .ignoresSafeArea(edges: .bottom)
-                .navigationTitle("Open Reddit")
+                .navigationTitle("Sign in to Reddit")
                 .navigationBarTitleDisplayMode(.inline)
                 .safeAreaInset(edge: .top) {
-                    Text("If Reddit shows a check, complete it here. Then tap Done.")
+                    Label("You're signing in on reddit.com. Qorvex never sees your password.", systemImage: "lock.fill")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 16).padding(.vertical, 8)
@@ -152,17 +176,34 @@ struct RedditVerifyView: View {
                         .background(.bar)
                 }
                 .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
-                            WebTransport.shared.reset()
-                            Task { @MainActor in NetworkStatus.shared.blocked = false }
-                            onDone()
-                            dismiss()
-                        }
-                        .fontWeight(.semibold)
+                        Button("Done") { Task { await complete() } }.fontWeight(.semibold)
+                    }
+                }
+                .task {
+                    // Watch for the session cookie and finish automatically once signed in.
+                    while !Task.isCancelled && !finished {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        if await RedditAccount.isSignedIn() { await complete(); break }
                     }
                 }
         }
+    }
+
+    private func complete() async {
+        guard !finished else { return }
+        finished = true
+        WebTransport.shared.reset()
+        await RedditAccount.refresh()
+        NetworkStatus.shared.blocked = false
+        NetworkStatus.shared.loginRequired = false
+        if NetworkStatus.shared.signedIn {
+            Haptics.success()
+            Presenter.shared.show("Signed in to Reddit")
+        }
+        onDone()
+        dismiss()
     }
 }
 

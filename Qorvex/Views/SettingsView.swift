@@ -34,6 +34,19 @@ struct SettingsView: View {
                 .padding(.vertical, 4)
             }
 
+            Section {
+                if NetworkStatus.shared.signedIn {
+                    Label("Signed in to Reddit", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                    Button("Sign Out", role: .destructive) {
+                        Task { await RedditAccount.signOut(); Presenter.shared.show("Signed out") }
+                    }
+                } else {
+                    Button { Presenter.shared.verify = true } label: { Label("Sign in to Reddit", systemImage: "person.crop.circle") }
+                }
+            } header: { Text("Reddit Account") } footer: {
+                Text("Reddit only serves feeds to signed-in accounts. You sign in on reddit.com itself, so Qorvex never sees your password. Joined communities, saved posts and history in Qorvex stay on this device.")
+            }
+
             Section("Appearance") {
                 Picker("Theme", selection: $settings.theme) { ForEach(AppTheme.allCases) { Text($0.label).tag($0) } }
                 VStack(alignment: .leading, spacing: 10) {
@@ -113,7 +126,6 @@ struct SettingsView: View {
                 Picker("Cache Freshness", selection: $settings.cacheMode) { ForEach(CacheMode.allCases) { Text($0.label).tag($0) } }
                 Picker("Source", selection: $settings.source) { ForEach(ImageSource.allCases) { Text($0.label).tag($0) } }
                 Picker("Connection", selection: $settings.connection) { ForEach(ConnectionMode.allCases) { Text($0.label).tag($0) } }
-                Button { Presenter.shared.verify = true } label: { Label("Open Reddit to Verify", systemImage: "safari") }
                 NavigationLink { ConnectionLogView() } label: { Label("Connection Log", systemImage: "list.bullet.rectangle") }
                 LabeledContent("Cache", value: cacheInfo)
                 Button("Clear Cache", role: .destructive) {
@@ -125,7 +137,7 @@ struct SettingsView: View {
                     }
                 }
             } header: { Text("Network & Rate Limits") } footer: {
-                Text("Connection: Automatic tries a direct request and switches to the built-in browser engine if Reddit filters it. If Reddit still blocks, use Open Reddit to Verify. Qorvex reads Reddit's public pages directly from your iPhone — no API key, no account, no server. It paces itself under Reddit's anonymous limit and serves repeat views from cache, so it never hammers Reddit. Keep the budget at 10 or below. If Reddit ever pushes back, Qorvex automatically slows down and shows cached content.")
+                Text("Connection: Automatic tries a direct request and switches to the built-in browser engine if Reddit filters it. Qorvex reads Reddit's public pages directly from your iPhone — no API key, no account, no server. It paces itself under Reddit's anonymous limit and serves repeat views from cache, so it never hammers Reddit. Keep the budget at 10 or below. If Reddit ever pushes back, Qorvex automatically slows down and shows cached content.")
             }
 
             Section {
@@ -142,7 +154,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
-        .task { await refreshCacheInfo() }
+        .task { await refreshCacheInfo(); await RedditAccount.refresh() }
         .fileExporter(isPresented: $exporting, document: BackupDocument(data: library.exportData()), contentType: .json, defaultFilename: "qorvex-backup") { result in
             if case .success = result { Presenter.shared.show("Backup exported") }
         }

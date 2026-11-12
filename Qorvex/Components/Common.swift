@@ -52,23 +52,30 @@ struct ErrorState: View {
     let retry: () -> Void
 
     var body: some View {
-        let blocked = NetworkStatus.shared.blocked
+        let net = NetworkStatus.shared
         VStack(spacing: 14) {
-            EmptyState(icon: blocked ? "hand.raised" : "exclamationmark.triangle", title: message,
-                       message: blocked
-                        ? "Reddit is filtering this connection. Open Reddit once and complete any check it shows — Qorvex shares that browser session. Cached and saved posts still work."
-                        : "Your cached and saved posts still work offline.")
-            if blocked {
+            if net.loginRequired {
+                EmptyState(icon: "person.crop.circle.badge.exclamationmark", title: "Sign in to keep reading",
+                           message: "Reddit now only serves feeds to signed-in accounts. Sign in on Reddit's own page — Qorvex never sees your password. Saved and cached posts still work.")
                 Button {
                     Presenter.shared.afterVerify = retry
                     Presenter.shared.verify = true
-                } label: { Label("Open Reddit to Verify", systemImage: "safari") }
+                } label: { Label("Sign in to Reddit", systemImage: "person.crop.circle") }
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
-                Button("Try Again", action: retry)
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
+                Button("Try Again", action: retry).buttonStyle(.bordered).buttonBorderShape(.capsule)
+            } else if net.blocked {
+                EmptyState(icon: "hand.raised", title: message,
+                           message: "Reddit is filtering this connection. Signing in to Reddit usually fixes it. Cached and saved posts still work.")
+                Button {
+                    Presenter.shared.afterVerify = retry
+                    Presenter.shared.verify = true
+                } label: { Label("Sign in to Reddit", systemImage: "person.crop.circle") }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                Button("Try Again", action: retry).buttonStyle(.bordered).buttonBorderShape(.capsule)
             } else {
+                EmptyState(icon: "exclamationmark.triangle", title: message, message: "Your cached and saved posts still work offline.")
                 Button("Try Again", action: retry)
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.capsule)
