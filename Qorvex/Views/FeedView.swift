@@ -57,18 +57,36 @@ final class FeedModel {
             error = nil; staleNote = nil
             cursor = 0; subAfter = [:]; exhausted = []
         }
+        // Signed in: Home is the account's own front page (your Reddit subscriptions, Reddit's order).
+        if source == .home && NetworkStatus.shared.signedIn && !Self.frontPageBlocked {
+            if let e = await loadSingle(path: "", reset: reset, force: force, gen: gen) {
+                if case RedditError.blocked(_) = e { Self.frontPageBlocked = true }
+                else if case RedditError.loginRequired = e { Self.frontPageBlocked = true }
+                else if case RedditError.decoding = e { Self.frontPageBlocked = true }
+                else { return }
+                // Fall back to merging the communities saved in Qorvex.
+                error = nil
+                loading = true
+                cursor = 0; subAfter = [:]; exhausted = []
+            } else { return }
+        }
         if let subs = mergedSubs {
             await loadMerged(subs, reset: reset, force: force, gen: gen)
         } else {
-            await loadSingle(reset: reset, force: force, gen: gen)
+            _ = await loadSingle(path: singlePath, reset: reset, force: force, gen: gen)
         }
     }
 
-    @MainActor
-    private func loadSingle(reset: Bool, force: Bool, gen: Int) async {
+    /// Set once Reddit refuses the signed-in front page, so we don't keep asking this session.
+    static var frontPageBlocked = false
+
+    var usingFrontPage: Bool { source == .home && NetworkStatus.shared.signedIn && !Self.frontPageBlocked }
+
+    @MainActor @discardableResult
+    private func loadSingle(path: String, reset: Bool, force: Bool, gen: Int) async -> Error? {
         do {
-            let r = try await Reddit.listing(singlePath, sort: sort, time: time, after: reset ? nil : after, force: force)
-            guard gen == generation else { return }
+            let r = try await Reddit.listing(path, sort: sort, time: time, after: reset ? nil : after, force: force)
+            guard gen == generation else { return nil }
             if reset { posts = []; seen = []; done = false }
             let new = accept(r.value.data.children)
             posts.append(contentsOf: new)
@@ -77,10 +95,12 @@ final class FeedModel {
             staleNote = r.stale ? "\(r.error?.localizedDescription ?? "Offline") · showing cached from \(Int(r.age / 60)) min ago" : nil
             loading = false
             if new.count < 5 && !done { await load() }
+            return nil
         } catch {
-            guard gen == generation else { return }
+            guard gen == generation else { return nil }
             self.error = error.localizedDescription
             loading = false
+            return error
         }
     }
 
@@ -178,7 +198,11 @@ struct FeedView: View {
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
-            if source == .home && library.subs.isEmpty {
+            if source == .home && model.usingFrontPage && model.posts.isEmpty == false {
+                Label("Your Reddit front page", systemImage: "person.crop.circle.badge.checkmark")
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.secondary).plainRow()
+            }
+            if source == .home && library.subs.isEmpty && !model.usingFrontPage {
                 HintCard(icon: "sparkles", text: "Your Home shows Popular until you join communities. Find some in Search or Library.")
                     .plainRow()
             }

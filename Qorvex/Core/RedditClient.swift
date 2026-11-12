@@ -489,6 +489,19 @@ enum Reddit {
         try await RedditClient.shared.get("/subreddits/popular.json" + q(["limit": "50", "after": after]), as: ListingResponse.self, kind: .about)
     }
 
+    /// The signed-in account's subscribed communities (`/subreddits/mine/subscriber/.json`).
+    static func mySubscriptions() async throws -> [String] {
+        var names: [String] = []
+        var after: String? = nil
+        for _ in 0..<5 {
+            let r = try await RedditClient.shared.get("/subreddits/mine/subscriber.json" + q(["limit": "100", "after": after]), as: ListingResponse.self, force: true)
+            for t in r.value.data.children { if case .subreddit(let s) = t { names.append(s.display_name) } }
+            after = r.value.data.after
+            if after == nil { break }
+        }
+        return names
+    }
+
     static func user(_ name: String) async throws -> RedditUser {
         try await RedditClient.shared.get("/user/\(name)/about.json", as: Wrapped<RedditUser>.self, kind: .about).value.data
     }

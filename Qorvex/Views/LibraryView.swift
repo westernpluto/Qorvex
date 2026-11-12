@@ -5,6 +5,7 @@ struct LibraryView: View {
     @State private var addingSub = false
     @State private var newSub = ""
     @State private var editingFeed: CustomFeed?
+    @State private var importing = false
     private var library: Library { .shared }
 
     var body: some View {
@@ -35,6 +36,20 @@ struct LibraryView: View {
                 Text("Custom Feeds")
             } footer: {
                 Text("Combine communities into your own feeds.")
+            }
+
+            if NetworkStatus.shared.signedIn {
+                Section {
+                    Button { Task { await importSubs() } } label: {
+                        HStack {
+                            Label("Import My Reddit Communities", systemImage: "square.and.arrow.down.on.square")
+                            if importing { Spacer(); ProgressView() }
+                        }
+                    }
+                    .disabled(importing)
+                } footer: {
+                    Text("Copies the communities you've joined on Reddit into Qorvex, for custom feeds and this list. Home already shows your Reddit front page when you're signed in.")
+                }
             }
 
             Section {
@@ -81,6 +96,21 @@ struct LibraryView: View {
             Button("Cancel", role: .cancel) { newSub = "" }
         }
         .sheet(item: $editingFeed) { f in FeedEditor(feed: f) }
+    }
+
+    @MainActor private func importSubs() async {
+        importing = true
+        defer { importing = false }
+        do {
+            let names = try await Reddit.mySubscriptions()
+            guard !names.isEmpty else { Presenter.shared.show("No communities found on your account"); return }
+            let added = names.filter { !library.isSubscribed($0) }
+            library.subs.append(contentsOf: added)
+            Haptics.success()
+            Presenter.shared.show("Imported \(names.count) communities (\(added.count) new)")
+        } catch {
+            Presenter.shared.show("Reddit didn't allow importing: \(error.localizedDescription)")
+        }
     }
 }
 
