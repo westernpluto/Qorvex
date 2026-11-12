@@ -109,6 +109,7 @@ actor RedditClient {
     private let session: URLSession
     private let cacheDir: URL
     private var preferBrowser = false
+    private var loginWallUntil = Date.distantPast
     private var userAgent: String?
 
     init() {
@@ -185,6 +186,8 @@ actor RedditClient {
         Task.detached(priority: .utility) { try? data.write(to: url, options: .atomic) }
     }
 
+    func clearLoginWall() { loginWallUntil = .distantPast }
+
     func clearCache() {
         memory = [:]; memoryOrder = []
         try? FileManager.default.removeItem(at: cacheDir)
@@ -213,6 +216,8 @@ actor RedditClient {
         let sep = path.contains("?") ? "&" : "?"
         guard let url = URL(string: host + path + sep + "raw_json=1") else { throw RedditError.notFound }
         let browserFirst = mode == .browser || (mode == .automatic && preferBrowser)
+        // After hitting the login wall, don't keep knocking: fail fast for a couple of minutes.
+        if Date() < loginWallUntil { throw RedditError.loginRequired }
         do {
             try await acquireSlot()
             let data = browserFirst ? try await viaBrowser(url) : try await viaDirect(url)
@@ -230,6 +235,7 @@ actor RedditClient {
                     return data
                 } catch RedditError.loginRequired { } catch RedditError.blocked { }
             }
+            loginWallUntil = Date().addingTimeInterval(120)
             await setState(blocked: false, login: true)
             throw RedditError.loginRequired
         } catch RedditError.blocked(let code) {
@@ -243,6 +249,7 @@ actor RedditClient {
                     await setState(blocked: false, login: false)
                     return data
                 } catch RedditError.loginRequired {
+                    loginWallUntil = Date().addingTimeInterval(120)
                     await setState(blocked: false, login: true)
                     throw RedditError.loginRequired
                 } catch RedditError.blocked { }
@@ -319,6 +326,7 @@ actor RedditClient {
         let r = try await WebTransport.shared.fetch(url)
         let redirectedAway = r.finalURL.map { !Self.isJSONResource($0) } ?? false
         await log("browser", url, r.status, r.contentType, redirectedAway ? r.finalURL?.absoluteString : nil, r.data)
+        if r.status == 429 { return try await interpret(status: 429, contentType: r.contentType, retryAfter: r.retryAfter, data: r.data) }
         if redirectedAway {
             if let f = r.finalURL, Self.isLoginWall(f) { throw RedditError.loginRequired }
             throw RedditError.blocked(r.status == 200 ? 302 : r.status)

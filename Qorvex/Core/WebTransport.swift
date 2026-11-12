@@ -19,6 +19,8 @@ final class WebTransport: NSObject, WKNavigationDelegate {
     private var loading = false
     private var lastResponse: HTTPURLResponse?
     private var preferNavigation = false
+    private var triedNavigation = false
+    private var lastFullPrime = Date.distantPast
 
     override init() {
         webView = WebTransport.makeWebView()
@@ -55,6 +57,7 @@ final class WebTransport: NSObject, WKNavigationDelegate {
         loadedOrigin = nil
         fullyPrimed = []
         preferNavigation = false
+        triedNavigation = false
     }
 
     struct Response {
@@ -72,17 +75,20 @@ final class WebTransport: NSObject, WKNavigationDelegate {
 
         if preferNavigation { return try await navigate(url) }
 
-        try await prime(origin, full: fullyPrimed.contains(origin))
+        try await prime(origin, full: false)
         var r = try await run(url)
-        if Self.looksBlocked(r), !fullyPrimed.contains(origin) {
-            // Open the real front page once so the session is established, then retry.
-            fullyPrimed.insert(origin)
+        if r.status == 429 { return r }
+        if Self.looksBlocked(r), Date().timeIntervalSince(lastFullPrime) > 600 {
+            // Open the real front page (at most every 10 min) so the session is established, then retry once.
+            lastFullPrime = Date()
             try await prime(origin, full: true)
             r = try await run(url)
+            if r.status == 429 { return r }
         }
-        if Self.looksBlocked(r) {
+        if Self.looksBlocked(r) && !triedNavigation {
+            triedNavigation = true
             await logCookies(for: url)
-            // fetch() was treated as signed out; load the JSON as a normal page instead.
+            // fetch() was treated as signed out; try loading the JSON as a normal page, once per launch.
             let n = try await navigate(url)
             if !Self.looksBlocked(n) { preferNavigation = true }
             return n
@@ -262,6 +268,7 @@ struct RedditVerifyView: View {
         await RedditAccount.refresh()
         NetworkStatus.shared.blocked = false
         NetworkStatus.shared.loginRequired = false
+        await RedditClient.shared.clearLoginWall()
         if NetworkStatus.shared.signedIn {
             Haptics.success()
             Presenter.shared.show("Signed in to Reddit")
