@@ -247,9 +247,12 @@ enum RedditAccount {
     }
 
     static func set(_ signedIn: Bool, name: String?) {
-        NetworkStatus.shared.signedIn = signedIn
-        NetworkStatus.shared.username = name
-        AppSettings.shared.webSessionSignedIn = signedIn
+        // Only publish real changes, so screens don't reload when a check just confirms the state.
+        if NetworkStatus.shared.signedIn != signedIn { NetworkStatus.shared.signedIn = signedIn }
+        if NetworkStatus.shared.username != name { NetworkStatus.shared.username = name }
+        if AppSettings.shared.webSessionSignedIn != signedIn { AppSettings.shared.webSessionSignedIn = signedIn }
+        UserDefaults.standard.set(signedIn, forKey: "qx.signedIn")
+        UserDefaults.standard.set(name, forKey: "qx.username")
     }
 }
 

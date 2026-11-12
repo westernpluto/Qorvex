@@ -1,13 +1,12 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case home, communities, search, saved, settings
+    case home, search, saved, settings
     var id: String { rawValue }
     var label: String { rawValue.capitalized }
     var icon: String {
         switch self {
         case .home: return "house.fill"
-        case .communities: return "square.grid.2x2.fill"
         case .search: return "magnifyingglass"
         case .saved: return "bookmark.fill"
         case .settings: return "gearshape.fill"
@@ -36,7 +35,7 @@ struct RootView: View {
     var body: some View {
         TabView(selection: $tab) {
             ForEach(AppTab.allCases) { t in
-                AdaptiveStack(split: t.usesSplit) { rootContent(t) }
+                AdaptiveStack(split: t.usesSplit, initialPath: t == .home ? [.feed(.home)] : []) { rootContent(t) }
                     .tabItem { Label(t.label, systemImage: t.icon) }
                     .tag(t)
             }
@@ -73,8 +72,7 @@ struct RootView: View {
     @ViewBuilder
     private func rootContent(_ t: AppTab) -> some View {
         switch t {
-        case .home: FeedView(source: .home)
-        case .communities: CommunitiesView()
+        case .home: CommunitiesView()
         case .search: SearchView()
         case .saved: SavedTab()
         case .settings: SettingsView()
@@ -99,11 +97,14 @@ private struct PacingOverlay: View {
 /// it into a single stack when the space is compact and expands it again when there's room.
 struct AdaptiveStack<Root: View>: View {
     var split: Bool = true
+    /// Screens already pushed when the tab first appears (Home opens straight to your feed).
+    var initialPath: [Route] = []
     @ViewBuilder let root: () -> Root
     @State private var listRouter = Router()
     @State private var detailRouter = Router()
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var wasWide: Bool?
+    @State private var didSeed = false
     private var settings: AppSettings { .shared }
 
     var body: some View {
@@ -149,7 +150,13 @@ struct AdaptiveStack<Root: View>: View {
                 .handlesLinks(listRouter)
             }
         }
-        .onAppear(perform: configure)
+        .onAppear {
+            if !didSeed {
+                didSeed = true
+                for r in initialPath { listRouter.path.append(r) }
+            }
+            configure()
+        }
         .onChange(of: settings.twoPane) { _, _ in configure() }
         .onChange(of: sizeClass) { _, _ in configure() }
         .onChange(of: listRouter.compactColumn) { _, col in

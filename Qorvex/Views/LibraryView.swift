@@ -178,7 +178,7 @@ struct DiscoverView: View {
     }
 }
 
-/// Communities tab: Popular, All and your communities, one tap away from the side tab bar.
+/// The Home tab's list: Home, Popular, All, then your communities, all in one place.
 struct CommunitiesView: View {
     @State private var filter = ""
     @Environment(Router.self) private var router
@@ -194,29 +194,35 @@ struct CommunitiesView: View {
         List {
             if filter.isEmpty {
                 Section {
-                    feedRow(.popular, title: "Popular", icon: "flame.fill", color: .orange)
-                    feedRow(.all, title: "All", icon: "globe", color: .green)
+                    feedRow(.home, title: "Home", subtitle: "Your front page", icon: "house.fill", color: .accentColor)
+                    feedRow(.popular, title: "Popular", subtitle: "Trending across Reddit", icon: "flame.fill", color: .orange)
+                    feedRow(.all, title: "All", subtitle: "Everything", icon: "globe", color: .green)
                 }
+                .listRowBackground(Color.cardBackground)
             }
 
             Section {
                 if !NetworkStatus.shared.signedIn && library.subs.isEmpty {
-                    SignInBanner().listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                    SignInBanner()
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                        .listRowBackground(Color.clear)
                 } else if subs.isEmpty {
                     Text(filter.isEmpty ? "You haven't joined any communities yet." : "No matches")
                         .foregroundStyle(.secondary)
+                        .listRowBackground(Color.cardBackground)
                 }
                 ForEach(subs, id: \.self) { s in
                     NavigationLink(value: Route.feed(.subreddit(s))) {
                         HStack(spacing: 14) {
-                            Avatar(name: s, url: library.icon(for: s), size: 34)
-                            Text("r/\(s)")
+                            Avatar(name: s, url: library.icon(for: s), size: 32)
+                            Text(s)
                                 .font(.body.weight(.medium))
                                 .lineLimit(1)
-                                .truncationMode(.middle)
+                                .truncationMode(.tail)
                         }
                         .frame(minHeight: 44)
                     }
+                    .listRowBackground(Color.cardBackground)
                     .contextMenu {
                         Button(role: .destructive) {
                             library.toggleSubscription(s)
@@ -225,33 +231,48 @@ struct CommunitiesView: View {
                     }
                 }
             } header: {
-                if !library.subs.isEmpty { Text("Your Communities · \(library.subs.count)") }
+                if !library.subs.isEmpty {
+                    Text("Your Communities").textCase(nil).font(.footnote.weight(.semibold))
+                }
             }
 
             if filter.isEmpty {
                 Section {
                     NavigationLink(value: Route.discover) {
-                        Label("Discover Communities", systemImage: "sparkles").frame(minHeight: 44)
+                        HStack(spacing: 14) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 32, height: 32)
+                            Text("Discover Communities").font(.body.weight(.medium))
+                        }
+                        .frame(minHeight: 44)
                     }
+                    .listRowBackground(Color.cardBackground)
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Communities")
+        .scrollContentBackground(.hidden)
+        .background(Color.appBackground)
+        .navigationTitle("Feeds")
         .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter communities")
     }
 
-    private func feedRow(_ src: FeedSource, title: String, icon: String, color: Color) -> some View {
+    private func feedRow(_ src: FeedSource, title: String, subtitle: String, icon: String, color: Color) -> some View {
         NavigationLink(value: Route.feed(src)) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
+                    .frame(width: 32, height: 32)
                     .background(color.gradient, in: Circle())
-                Text(title).font(.body.weight(.medium))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.body.weight(.semibold))
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: 48)
         }
     }
 }

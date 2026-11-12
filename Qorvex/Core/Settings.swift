@@ -189,7 +189,7 @@ final class AppSettings {
     var apiActive: Bool { connection == .api && apiSignedIn }
 
     /// Signed in on reddit.com (verified via /api/me). Mirrors NetworkStatus.signedIn for non-UI code.
-    var webSessionSignedIn = false
+    var webSessionSignedIn = UserDefaults.standard.bool(forKey: "qx.signedIn")
     /// The web-session route (cookie auth on oauth.reddit.com) is paused until this time after repeated blocks.
     var sessionCooldownUntil = Date.distantPast
 

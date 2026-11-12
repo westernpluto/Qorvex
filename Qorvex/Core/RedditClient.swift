@@ -55,8 +55,9 @@ final class NetworkStatus {
     var lastError: String?
     var blocked = false
     var loginRequired = false
-    var signedIn = false
-    var username: String?
+    // Restored from the last launch so Home loads your own feed from the first frame.
+    var signedIn = UserDefaults.standard.bool(forKey: "qx.signedIn")
+    var username: String? = UserDefaults.standard.string(forKey: "qx.username")
     var usingBrowserEngine = false
     var backoffUntil: Date?
 

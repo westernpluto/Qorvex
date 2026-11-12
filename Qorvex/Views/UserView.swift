@@ -66,6 +66,10 @@ struct UserView: View {
         }
         .refreshable { await load(reset: true, force: true) }
         .task {
+            if user == nil && Reddit.apiActive {
+                user = try? await Reddit.user(name)
+                if let u = user { AvatarStore.shared.remember(u.name, u.iconURL) }
+            }
             if items.isEmpty { await load(reset: true) }
         }
         .handlesLinks(router)
@@ -73,7 +77,7 @@ struct UserView: View {
 
     private var header: some View {
         VStack(spacing: 10) {
-            Avatar(name: name, url: user?.iconURL, size: 84)
+            Avatar(name: name, url: user?.iconURL ?? AvatarStore.shared.url(for: name), size: 84)
                 .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
             Text(user?.subreddit?.title?.isEmpty == false ? user!.subreddit!.title! : "u/\(name)").font(.title3.bold())
             if let u = user {

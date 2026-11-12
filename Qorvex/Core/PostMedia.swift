@@ -163,7 +163,8 @@ enum InlineMedia {
         pattern: #"https?://(?:i\.redd\.it|preview\.redd\.it|i\.imgur\.com|media\d?\.giphy\.com|i\.giphy\.com)/[^\s)\]]+?\.(?:jpe?g|png|webp|gif|gifv|mp4)(?:\?[^\s)\]]*)?"#,
         options: [.caseInsensitive])
 
-    private static let tokenRE = try! NSRegularExpression(pattern: #"!\[(gif|img)\]\(([^)\s]+)\)"#, options: [.caseInsensitive])
+    /// Any markdown image token: ![gif](...), ![img](...), ![video](...), ![alt](https://...).
+    private static let tokenRE = try! NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)\s]+)\)"#, options: [.caseInsensitive])
     private static let mediaHosts = #"(?:i\.redd\.it|preview\.redd\.it|i\.imgur\.com|media\d?\.giphy\.com|i\.giphy\.com)"#
     private static let linkRE = try! NSRegularExpression(pattern: #"\[[^\]]*\]\(\s*<?https?://"# + mediaHosts + #"/[^)\s]+>?\s*\)"#, options: [.caseInsensitive])
 
@@ -195,8 +196,11 @@ enum InlineMedia {
                     mp4 = URL(string: "https://i.giphy.com/media/\(parts[1])/giphy.mp4")
                 } else if parts.first == "emote", parts.count >= 3 {
                     still = URL(string: "https://www.redditstatic.com/marketplace-assets/v1/core/emotes/snoomoji_emotes/\(parts[1])/\(parts[2]).gif")
+                } else if value.hasPrefix("http"), let u = URL(string: value) {
+                    still = u
+                    if value.lowercased().contains(".mp4") || value.lowercased().contains("format=mp4") { mp4 = u }
                 } else if parts.count == 1, !value.contains("/") {
-                    still = URL(string: "https://i.redd.it/\(value).\(kind == "gif" ? "gif" : "jpg")")
+                    still = URL(string: "https://i.redd.it/\(value).\(kind == "img" ? "jpg" : "gif")")
                 }
                 guard let still, seen.insert(still.absoluteString).inserted else { continue }
                 out.append(GalleryEntry(id: idPrefix + "t\(out.count)", url: still, full: still, size: nil, caption: nil, mp4: mp4))

@@ -101,7 +101,6 @@ jobs:
           xcrun simctl help io > shots/simctl-io-help.txt 2>&1 || true
           NAME=home shoot -QXTab home
           NAME=post shoot -QXTab home -QXOpenSample
-          NAME=communities shoot -QXTab communities
           NAME=search shoot -QXTab search
           NAME=saved shoot -QXTab saved
           NAME=settings shoot -QXTab settings

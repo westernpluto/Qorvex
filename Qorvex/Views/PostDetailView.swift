@@ -374,6 +374,15 @@ struct PostDetailView: View {
                         Button { UIPasteboard.general.url = u; Presenter.shared.show("Link copied") } label: { Label("Copy Link", systemImage: "link") }
                     }
                     Button { collapseThread(of: node) } label: { Label("Collapse Thread", systemImage: "arrow.up.to.line") }
+                    Button {
+                        var info = "id: \(c.id)\nbody: \(c.body ?? "")\n"
+                        for (k, m) in (c.media_metadata ?? [:]) {
+                            info += "meta \(k): status=\(m.status ?? "-") e=\(m.e ?? "-") u=\(m.s?.u ?? "-") gif=\(m.s?.gif ?? "-") mp4=\(m.s?.mp4 ?? "-")\n"
+                        }
+                        info += "shown: " + node.media.map { $0.mp4?.absoluteString ?? $0.url.absoluteString }.joined(separator: ", ")
+                        UIPasteboard.general.string = info
+                        Presenter.shared.show("Debug info copied")
+                    } label: { Label("Copy Debug Info", systemImage: "ladybug") }
                     Button { router.push(.user(c.author)) } label: { Label("u/\(c.author)", systemImage: "person.crop.circle") }
                     Button(role: .destructive) { library.filters.users.append(c.author); Presenter.shared.show("u/\(c.author) filtered") } label: {
                         Label("Filter User's Posts", systemImage: "nosign")

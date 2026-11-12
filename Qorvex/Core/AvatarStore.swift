@@ -20,6 +20,11 @@ final class AvatarStore {
 
     func url(for name: String) -> URL? { urls[name.lowercased()].flatMap(URL.init(string:)) }
 
+    func remember(_ name: String, _ url: URL?) {
+        guard let url, urls[name.lowercased()] != url.absoluteString else { return }
+        urls[name.lowercased()] = url.absoluteString
+    }
+
     /// Fetch pictures for any of these (fullname, username) pairs we don't know yet.
     func ensure(_ pairs: [(fullname: String, name: String)]) async {
         guard NetworkStatus.shared.signedIn || AppSettings.shared.apiActive else { return }
