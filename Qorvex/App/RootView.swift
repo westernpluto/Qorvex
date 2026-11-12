@@ -54,7 +54,10 @@ struct RootView: View {
                         .padding(.leading, 16).padding(.top, 8)
                 }
         }
-        .task { await RedditAccount.refresh() }
+        .task {
+            await RedditAccount.refresh()
+            settings.apiSignedIn = await RedditAPIAuth.shared.hasTokens
+        }
         .tint(settings.accent.color)
         .preferredColorScheme(settings.theme.scheme)
         .dynamicTypeSize(settings.textSize.dynamic)

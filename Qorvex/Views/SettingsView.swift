@@ -47,6 +47,43 @@ struct SettingsView: View {
                 Text("Reddit only serves feeds to signed-in accounts. You sign in on reddit.com itself, so Qorvex never sees your password. Joined communities, saved posts and history in Qorvex stay on this device.")
             }
 
+            Section {
+                TextField("Client ID", text: $settings.apiClientID)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .font(.body.monospaced())
+                TextField("Redirect URI", text: $settings.apiRedirectURI)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .font(.body.monospaced())
+                TextField("User Agent", text: $settings.apiUserAgent, axis: .vertical)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .font(.footnote.monospaced())
+                if settings.apiSignedIn {
+                    Label("Signed in with your API key", systemImage: "key.fill").foregroundStyle(.green)
+                    if settings.connection != .api {
+                        Button("Use Reddit API Mode") { settings.connection = .api }
+                    }
+                    Button("Sign Out of API", role: .destructive) {
+                        Task { await RedditAPISignIn.shared.signOut(); Presenter.shared.show("Signed out of the API") }
+                    }
+                } else {
+                    Button {
+                        Task {
+                            do {
+                                try await RedditAPISignIn.shared.signIn()
+                                settings.connection = .api
+                                Haptics.success()
+                                Presenter.shared.show("Connected to the Reddit API")
+                            } catch {
+                                Presenter.shared.show(error.localizedDescription)
+                            }
+                        }
+                    } label: { Label("Sign In with Reddit API", systemImage: "key") }
+                    .disabled(settings.apiClientID.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } header: { Text("Reddit API (Your Own Key)") } footer: {
+                Text("Optional, like Apollo Reborn: use your own Reddit API app for every feature (all sorts, search, multi-community Home, load more replies) at up to 60 requests/min. Find your app at reddit.com/prefs/apps: it must be an “installed app”, and its redirect URI must exactly match the one above. Use your own app and a User Agent naming your own username — borrowing another app's credentials breaks Reddit's terms and gets keys revoked. Reddit currently restricts creating new keys.")
+            }
+
             Section("Appearance") {
                 Picker("Theme", selection: $settings.theme) { ForEach(AppTheme.allCases) { Text($0.label).tag($0) } }
                 VStack(alignment: .leading, spacing: 10) {

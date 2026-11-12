@@ -8,6 +8,16 @@ Qorvex reads Reddit's public JSON pages directly from your iPhone. There's no AP
 
 Reddit now redirects signed-out requests for feed data to its login page, so Qorvex asks you to **sign in once on reddit.com itself** (in an in-app Reddit page). Qorvex never sees your password. It reads with that session the way Safari would, and still paces itself under the limits below. Sign out any time in Settings → Reddit Account.
 
+## Reddit API mode (optional, your own key)
+
+Like Apollo Reborn, Qorvex can use the official Reddit API with **your own** API app. That unlocks everything web mode can't: all sorts, search, multi-community Home, "load more replies" and community info, at up to 60 requests/min (Reddit allows 100).
+
+1. On reddit.com/prefs/apps, use an **installed app** you own. Its redirect URI must exactly match the one in Qorvex (default `qorvex://auth`).
+2. In Qorvex → Settings → Reddit API, enter the Client ID, Redirect URI and a User Agent naming your own username, e.g. `ios:com.qorvex.reader:v1.0 (by /u/yourname)`.
+3. Tap **Sign In with Reddit API** and approve on Reddit's official page. Tokens are stored in the iOS Keychain.
+
+Use your own credentials. Borrowing another app's client ID or User Agent breaks Reddit's terms and gets keys revoked. Note that Reddit currently restricts creating new API keys.
+
 ## About rate limits
 
 Reddit limits anonymous traffic to roughly 10 requests per minute per IP. Qorvex never goes over that limit:

@@ -128,13 +128,14 @@ enum AutoplayMode: String, CaseIterable, Identifiable {
 }
 
 enum ConnectionMode: String, CaseIterable, Identifiable {
-    case automatic, direct, browser
+    case automatic, direct, browser, api
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .automatic: return "Automatic"
+        case .automatic: return "Automatic (Web)"
         case .direct: return "Direct"
         case .browser: return "Browser Engine"
+        case .api: return "Reddit API (Your Key)"
         }
     }
 }
@@ -178,6 +179,14 @@ final class AppSettings {
     var cacheMode: CacheMode { didSet { d.set(cacheMode.rawValue, forKey: "cacheMode") } }
     var source: ImageSource { didSet { d.set(source.rawValue, forKey: "source") } }
     var connection: ConnectionMode { didSet { d.set(connection.rawValue, forKey: "connection") } }
+    var apiClientID: String { didSet { d.set(apiClientID, forKey: "apiClientID") } }
+    var apiRedirectURI: String { didSet { d.set(apiRedirectURI, forKey: "apiRedirectURI") } }
+    var apiUserAgent: String { didSet { d.set(apiUserAgent, forKey: "apiUserAgent") } }
+    /// Whether OAuth tokens exist (set at launch and on sign-in/out; not persisted).
+    var apiSignedIn = false
+
+    /// Official API mode is in use: selected and signed in.
+    var apiActive: Bool { connection == .api && apiSignedIn }
 
     private init() {
         func e<T: RawRepresentable>(_ k: String, _ def: T) -> T where T.RawValue == String {
@@ -210,6 +219,9 @@ final class AppSettings {
         cacheMode = e("cacheMode", CacheMode.balanced)
         source = e("source", ImageSource.www)
         connection = e("connection", ConnectionMode.automatic)
+        apiClientID = UserDefaults.standard.string(forKey: "apiClientID") ?? ""
+        apiRedirectURI = UserDefaults.standard.string(forKey: "apiRedirectURI") ?? "qorvex://auth"
+        apiUserAgent = UserDefaults.standard.string(forKey: "apiUserAgent") ?? "ios:com.qorvex.reader:v1.0 (by /u/YOUR_USERNAME)"
     }
 
     func reset() {

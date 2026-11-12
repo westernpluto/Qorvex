@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum RedditError: LocalizedError {
-    case offline, rateLimited, notFound, privateCommunity, banned, quarantined, blocked(Int), loginRequired, http(Int), decoding
+    case offline, rateLimited, notFound, privateCommunity, banned, quarantined, blocked(Int), loginRequired, apiNotSignedIn, apiAuthFailed(String), http(Int), decoding
 
     var errorDescription: String? {
         switch self {
@@ -10,6 +10,8 @@ enum RedditError: LocalizedError {
         case .rateLimited: return "Reddit asked us to slow down for a moment"
         case .notFound: return "Not found"
         case .loginRequired: return "Reddit now requires signing in"
+        case .apiNotSignedIn: return "Sign in with your Reddit API key in Settings"
+        case .apiAuthFailed(let m): return "Reddit API sign-in failed: \(m)"
         case .privateCommunity: return "This community is private"
         case .banned: return "This community has been banned"
         case .quarantined: return "This community is quarantined"
@@ -139,7 +141,7 @@ actor RedditClient {
                 continue
             }
             stamps.removeAll { now.timeIntervalSince($0) >= 60 }
-            let budget = max(1, await MainActor.run { AppSettings.shared.requestsPerMinute })
+            let budget = max(1, await MainActor.run { AppSettings.shared.apiActive ? max(60, AppSettings.shared.requestsPerMinute) : AppSettings.shared.requestsPerMinute })
             if stamps.count < budget {
                 stamps.append(now)
                 await MainActor.run {
@@ -212,6 +214,10 @@ actor RedditClient {
     // MARK: - Fetch
 
     private func download(_ path: String, host: String) async throws -> Data {
+        if await MainActor.run(body: { AppSettings.shared.apiActive }) {
+            try await acquireSlot()
+            return try await viaAPI(path)
+        }
         let mode = await MainActor.run { AppSettings.shared.connection }
         let sep = path.contains("?") ? "&" : "?"
         guard let url = URL(string: host + Self.pageStyle(path) + sep + "raw_json=1") else { throw RedditError.notFound }
@@ -336,6 +342,34 @@ actor RedditClient {
         throw RedditError.blocked(310)
     }
 
+    /// Official API: https://oauth.reddit.com with the user's own OAuth token.
+    private func viaAPI(_ path: String) async throws -> Data {
+        let (clientID, ua) = await MainActor.run { (AppSettings.shared.apiClientID, AppSettings.shared.apiUserAgent) }
+        var token = try await RedditAPIAuth.shared.accessToken(clientID: clientID, userAgent: ua)
+        let sep = path.contains("?") ? "&" : "?"
+        guard let url = URL(string: "https://oauth.reddit.com" + path + sep + "raw_json=1") else { throw RedditError.notFound }
+        for attempt in 0..<2 {
+            var req = URLRequest(url: url)
+            req.setValue("bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.setValue(ua, forHTTPHeaderField: "User-Agent")
+            let data: Data, response: URLResponse
+            do {
+                (data, response) = try await session.data(for: req)
+            } catch let e as URLError where [URLError.Code.notConnectedToInternet, URLError.Code.networkConnectionLost, URLError.Code.dataNotAllowed].contains(e.code) {
+                throw RedditError.offline
+            }
+            guard let http = response as? HTTPURLResponse else { throw RedditError.http(0) }
+            let ct = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            await log("api", url, http.statusCode, ct, nil, data)
+            if http.statusCode == 401 && attempt == 0 {
+                token = try await RedditAPIAuth.shared.accessToken(clientID: clientID, userAgent: ua, forceRefresh: true)
+                continue
+            }
+            return try await interpret(status: http.statusCode, contentType: ct, retryAfter: http.value(forHTTPHeaderField: "Retry-After"), data: data)
+        }
+        throw RedditError.apiNotSignedIn
+    }
+
     private func viaBrowser(_ url: URL) async throws -> Data {
         let r = try await WebTransport.shared.fetch(url)
         let redirectedAway = r.finalURL.map { !Self.isJSONResource($0) } ?? false
@@ -432,23 +466,30 @@ enum Reddit {
         return c.percentEncodedQuery.map { "?" + $0.replacingOccurrences(of: "+", with: "%2B") } ?? ""
     }
 
-    /// Reddit currently serves only a community's plain front page as JSON (`/r/pics/.json`);
-    /// sorted pages (`/r/pics/new/.json`) are blocked, so only Hot is requested.
-    static let sortsAvailable = false
+    /// Web mode: Reddit serves only a community's plain front page as JSON (`/r/pics/.json`);
+    /// sorted pages are blocked, so only Hot is requested. API mode supports every sort.
+    static var sortsAvailable: Bool { AppSettings.shared.apiActive }
+    static var apiActive: Bool { AppSettings.shared.apiActive }
 
     static func listing(_ path: String, sort: SortOrder, time: TimeRange, after: String?, force: Bool = false) async throws -> Fetched<ListingResponse> {
+        let api = apiActive
+        let base = path.isEmpty ? "" : "/\(path)"
         let page: String
-        if sort == .hot || !sortsAvailable {
-            page = "/\(path)"
+        if api {
+            page = "\(base)/\(sort.rawValue)"
         } else {
-            page = "/\(path)/\(sort.rawValue)"
+            page = base.isEmpty ? "/" : base
         }
-        let t: String? = sortsAvailable && sort.needsTime ? time.rawValue : nil
-        return try await RedditClient.shared.get(page + ".json" + q(["t": t, "after": after]), as: ListingResponse.self, force: force)
+        let t: String? = api && sort.needsTime ? time.rawValue : nil
+        return try await RedditClient.shared.get(page + ".json" + q(["limit": api ? "25" : nil, "t": t, "after": after]), as: ListingResponse.self, force: force)
     }
 
     /// A post's own page + `.json` (e.g. `/r/pics/comments/abc/title/.json`), as Safari would load it.
     static func comments(postID: String, permalink: String?, commentID: String?, sort: CommentSort, force: Bool = false) async throws -> Fetched<[ListingResponse]> {
+        if apiActive {
+            let path = "/comments/\(postID)" + (commentID.map { "/_/\($0)" } ?? "") + ".json"
+            return try await RedditClient.shared.get(path + q(["sort": sort.rawValue, "limit": "200", "context": commentID == nil ? nil : "3"]), as: [ListingResponse].self, kind: .post, force: force)
+        }
         var base: String
         if var p = permalink, p.hasPrefix("/") {
             if !p.hasSuffix("/") { p += "/" }
@@ -507,6 +548,7 @@ enum Reddit {
     }
 
     static func userListing(_ name: String, after: String?, force: Bool = false) async throws -> Fetched<ListingResponse> {
-        try await RedditClient.shared.get("/user/\(name).json" + q(["after": after]), as: ListingResponse.self, force: force)
+        let path = apiActive ? "/user/\(name)/overview.json" : "/user/\(name).json"
+        return try await RedditClient.shared.get(path + q(["after": after]), as: ListingResponse.self, force: force)
     }
 }

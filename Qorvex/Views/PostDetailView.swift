@@ -307,17 +307,18 @@ struct PostDetailView: View {
             // Reddit blocks the "load more" endpoint for apps, so open the parent's thread instead
             // (or the post on reddit.com for top-level overflow).
             Button {
-                if let parent = m.parent_id, parent.hasPrefix("t1_") {
+                if Reddit.apiActive {
+                    Task { await model.loadMore(node) }
+                } else if let parent = m.parent_id, parent.hasPrefix("t1_") {
                     router.push(.post(PostRef(id: ref.id, commentID: String(parent.dropFirst(3)), preview: model.post)))
                 } else if let p = model.post {
                     Presenter.shared.openExternal(p.webURL)
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: (m.parent_id ?? "").hasPrefix("t1_") ? "arrow.turn.down.right" : "safari")
-                    Text((m.parent_id ?? "").hasPrefix("t1_")
-                         ? "\(m.count ?? m.children.count) more \((m.count ?? 0) == 1 ? "reply" : "replies") — open thread"
-                         : "\(m.count ?? m.children.count) more comments on reddit.com")
+                    if model.loadingMore.contains(node.id) { ProgressView().controlSize(.small) }
+                    else { Image(systemName: Reddit.apiActive || (m.parent_id ?? "").hasPrefix("t1_") ? "arrow.turn.down.right" : "safari") }
+                    Text(moreLabel(m))
                 }
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
@@ -339,6 +340,14 @@ struct PostDetailView: View {
             .listRowSeparator(.hidden)
             .listRowBackground(Color.cardBackground)
         }
+    }
+
+    private func moreLabel(_ m: More) -> String {
+        let n = m.count ?? m.children.count
+        let noun = n == 1 ? "reply" : "replies"
+        if Reddit.apiActive { return "Load \(n) more \(noun)" }
+        if (m.parent_id ?? "").hasPrefix("t1_") { return "\(n) more \(noun) — open thread" }
+        return "\(n) more comments on reddit.com"
     }
 
     private func collapseThread(of node: CommentNode) {
