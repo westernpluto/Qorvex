@@ -192,6 +192,25 @@ struct CommunitiesView: View {
 
     var body: some View {
         List {
+            // Plain in-list filter (no system search UI, which can float over the window).
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.secondary)
+                TextField("Filter communities", text: $filter)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !filter.isEmpty {
+                    Button { filter = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear filter")
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 40)
+            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
             if filter.isEmpty {
                 Section {
                     feedRow(.home, title: "Home", subtitle: "Your front page", icon: "house.fill", color: .accentColor)
@@ -256,7 +275,6 @@ struct CommunitiesView: View {
         .scrollContentBackground(.hidden)
         .background(Color.appBackground)
         .navigationTitle("Feeds")
-        .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter communities")
     }
 
     private func feedRow(_ src: FeedSource, title: String, subtitle: String, icon: String, color: Color) -> some View {
