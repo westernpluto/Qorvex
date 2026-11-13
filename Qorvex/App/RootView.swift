@@ -42,7 +42,7 @@ struct RootView: View {
         }
         .overlay(alignment: .top) { PacingOverlay() }
         .overlay(alignment: .bottom) {
-            if let t = presenter.toast {
+            if let t = presenter.toast, !t.isEmpty {
                 Toast(text: t)
                     .padding(.bottom, 96)
                     .transition(.move(edge: .bottom).combined(with: .opacity))

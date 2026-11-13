@@ -155,8 +155,12 @@ final class Presenter {
     @ObservationIgnored private var toastTask: Task<Void, Never>?
 
     func show(_ message: String) {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Logged so stray on-screen bubbles can be traced (Settings → Advanced → Connection Log).
+        NetworkStatus.shared.record(RequestLog(via: "toast", url: text.isEmpty ? "(empty — suppressed)" : text, status: 0, contentType: "", location: nil, snippet: ""))
+        guard !text.isEmpty else { return }
         toastTask?.cancel()
-        withAnimation(.spring(duration: 0.3)) { toast = message }
+        withAnimation(.spring(duration: 0.3)) { toast = text }
         toastTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled else { return }
