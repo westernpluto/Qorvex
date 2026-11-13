@@ -207,7 +207,7 @@ struct FeedView: View {
     var body: some View {
         List {
             if let sub = source.subredditName {
-                SubredditHeader(name: sub, detail: model.posts.first?.sr_detail)
+                SubredditHeader(name: sub, detail: model.posts.first?.sr_detail, feedLoaded: !model.posts.isEmpty || model.done)
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)

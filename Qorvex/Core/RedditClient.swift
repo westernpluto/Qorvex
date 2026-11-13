@@ -143,7 +143,7 @@ actor RedditClient {
                 continue
             }
             stamps.removeAll { now.timeIntervalSince($0) >= 60 }
-            let budget = max(1, await MainActor.run { AppSettings.shared.apiActive ? max(60, AppSettings.shared.requestsPerMinute) : (AppSettings.shared.sessionRouteActive ? max(20, AppSettings.shared.requestsPerMinute) : AppSettings.shared.requestsPerMinute) })
+            let budget = max(1, await MainActor.run { AppSettings.shared.apiActive ? max(60, AppSettings.shared.requestsPerMinute) : (AppSettings.shared.sessionRouteActive ? max(15, AppSettings.shared.requestsPerMinute) : AppSettings.shared.requestsPerMinute) })
             if stamps.count < budget {
                 stamps.append(now)
                 await MainActor.run {

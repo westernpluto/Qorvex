@@ -197,6 +197,8 @@ struct SubredditHeader: View {
     let name: String
     /// Community details that arrived with the feed itself (no extra request).
     var detail: Subreddit? = nil
+    /// True once the feed has loaded; the header only asks Reddit if the feed lacked details.
+    var feedLoaded: Bool = false
     @State private var fetched: Subreddit?
     @State private var showAbout = false
 
@@ -261,11 +263,8 @@ struct SubredditHeader: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: detail?.display_name) {
-            // Only ask Reddit when the feed didn't already include the community's details.
-            guard detail == nil, fetched == nil, Reddit.apiActive else { return }
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard detail == nil else { return }
+        .task(id: feedLoaded) {
+            guard feedLoaded, detail == nil, fetched == nil, Reddit.apiActive else { return }
             fetched = try? await Reddit.about(name)
         }
         .sheet(isPresented: $showAbout) {

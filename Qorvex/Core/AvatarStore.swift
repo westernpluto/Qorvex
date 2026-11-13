@@ -35,6 +35,8 @@ final class AvatarStore {
         guard !missing.isEmpty else { return }
         var ids: [String] = []
         for p in missing where !ids.contains(p.fullname) { ids.append(p.fullname) }
+        // Top of the thread first; replies loaded later ask for their own authors.
+        if ids.count > 50 { ids = Array(ids.prefix(50)) }
         for chunk in stride(from: 0, to: ids.count, by: 100).map({ Array(ids[$0..<min($0 + 100, ids.count)]) }) {
             chunk.forEach { tried.insert($0) }
             guard let found = try? await Reddit.userData(ids: chunk), !found.isEmpty else { batchFailed = true; continue }
